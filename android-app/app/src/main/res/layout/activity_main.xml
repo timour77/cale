@@ -1,0 +1,500 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="#2A2A2A">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="18dp">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:orientation="horizontal">
+
+            <TextView
+                android:id="@+id/timeText"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="TIME: 00:00"
+                android:textColor="#F1407A"
+                android:textSize="26sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:id="@+id/weightText"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="16dp"
+                android:text="WEIGHT: —"
+                android:textColor="#18D1AE"
+                android:textSize="26sp"
+                android:textStyle="bold" />
+        </LinearLayout>
+
+        <TextView
+            android:id="@+id/flowText"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:text="FLOW: 0.0 g/s"
+            android:textColor="#18D1AE"
+            android:textSize="14sp"
+            android:maxLines="1"
+            android:ellipsize="end" />
+
+        <TextView
+            android:id="@+id/batteryText"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="2dp"
+            android:text="BAT: --%"
+            android:textColor="#BDBDBD"
+            android:textSize="13sp"
+            android:maxLines="1"
+            android:ellipsize="end" />
+
+        <Button
+            android:id="@+id/connectButton"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="10dp"
+            android:text="Connect" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="10dp"
+            android:orientation="horizontal">
+
+            <Button
+                android:id="@+id/tareButton"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="Tare"
+                android:enabled="false"
+                android:singleLine="true" />
+
+            <Button
+                android:id="@+id/timerButton"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="8dp"
+                android:layout_weight="1"
+                android:text="Start/Stop"
+                android:enabled="false"
+                android:singleLine="true" />
+
+            <Button
+                android:id="@+id/recipeToggleButton"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="8dp"
+                android:layout_weight="1"
+                android:text="Recipes"
+                android:enabled="false"
+                android:singleLine="true" />
+
+            <Button
+                android:id="@+id/graphToggleButton"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="8dp"
+                android:layout_weight="1"
+                android:text="Graph"
+                android:enabled="false"
+                android:singleLine="true" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:orientation="horizontal">
+
+            <Button
+                android:id="@+id/calZeroButton"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="CAL ZERO"
+                android:enabled="false"
+                android:singleLine="true" />
+
+            <Button
+                android:id="@+id/calSpanButton"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="8dp"
+                android:layout_weight="1"
+                android:text="CAL SPAN"
+                android:enabled="false"
+                android:singleLine="true" />
+
+            <Button
+                android:id="@+id/calGetButton"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="8dp"
+                android:layout_weight="1"
+                android:text="CAL GET"
+                android:enabled="false"
+                android:singleLine="true" />
+        </LinearLayout>
+
+        <com.github.mikephil.charting.charts.LineChart
+            android:id="@+id/weightChart"
+            android:layout_width="match_parent"
+            android:layout_height="180dp"
+            android:layout_marginTop="12dp"
+            android:visibility="gone" />
+
+        <LinearLayout
+            android:id="@+id/recipePanel"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="14dp"
+            android:orientation="vertical"
+            android:visibility="gone">
+
+            <TextView
+                android:id="@+id/recipeTitle"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="RECIPE: Decaf V60"
+                android:textColor="#F1407A"
+                android:textSize="16sp"
+                android:textStyle="bold" />
+
+            <Spinner
+                android:id="@+id/recipeSpinner"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content" />
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:orientation="horizontal">
+
+                <Button
+                    android:id="@+id/addRecipeButton"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="Add Recipe" />
+
+                <Button
+                    android:id="@+id/editRecipeButton"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="8dp"
+                    android:layout_weight="1"
+                    android:text="Edit Recipe" />
+            </LinearLayout>
+
+            <TextView
+                android:id="@+id/modeText"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="6dp"
+                android:text="MODE: Auto"
+                android:textColor="#BDBDBD"
+                android:textSize="12sp" />
+
+            <LinearLayout
+                android:id="@+id/stageRow1Container"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="12dp"
+                android:orientation="vertical">
+
+                <TextView
+                    android:id="@+id/stageRow1Title"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="[STAGE] —"
+                    android:textColor="#18D1AE"
+                    android:textSize="14sp" />
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="6dp"
+                    android:orientation="horizontal">
+
+                    <TextView
+                        android:id="@+id/stageRow1Name"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="● —"
+                        android:textColor="#18D1AE"
+                        android:textSize="14sp" />
+
+                    <ProgressBar
+                        android:id="@+id/stageRow1Bar"
+                        style="?android:attr/progressBarStyleHorizontal"
+                        android:layout_width="140dp"
+                        android:layout_height="10dp"
+                        android:layout_marginStart="8dp"
+                        android:progressDrawable="@drawable/progress_bar_module"
+                        android:max="100"
+                        android:progress="0" />
+                </LinearLayout>
+
+                <TextView
+                    android:id="@+id/stageRow1Value"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="0/0 g"
+                    android:textColor="#F1407A"
+                    android:textSize="12sp" />
+            </LinearLayout>
+
+            <LinearLayout
+                android:id="@+id/stageRow2Container"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="12dp"
+                android:orientation="vertical">
+
+                <TextView
+                    android:id="@+id/stageRow2Title"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="[STAGE] —"
+                    android:textColor="#18D1AE"
+                    android:textSize="14sp" />
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="6dp"
+                    android:orientation="horizontal">
+
+                    <TextView
+                        android:id="@+id/stageRow2Name"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="○ —"
+                        android:textColor="#18D1AE"
+                        android:textSize="14sp" />
+
+                    <ProgressBar
+                        android:id="@+id/stageRow2Bar"
+                        style="?android:attr/progressBarStyleHorizontal"
+                        android:layout_width="140dp"
+                        android:layout_height="10dp"
+                        android:layout_marginStart="8dp"
+                        android:progressDrawable="@drawable/progress_bar_module"
+                        android:max="100"
+                        android:progress="0" />
+                </LinearLayout>
+
+                <TextView
+                    android:id="@+id/stageRow2Value"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="0/0 g"
+                    android:textColor="#F1407A"
+                    android:textSize="12sp" />
+            </LinearLayout>
+
+            <LinearLayout
+                android:id="@+id/stageRow3Container"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="12dp"
+                android:orientation="vertical">
+
+                <TextView
+                    android:id="@+id/stageRow3Title"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="[STAGE] —"
+                    android:textColor="#18D1AE"
+                    android:textSize="14sp" />
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="6dp"
+                    android:orientation="horizontal">
+
+                    <TextView
+                        android:id="@+id/stageRow3Name"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="○ —"
+                        android:textColor="#18D1AE"
+                        android:textSize="14sp" />
+
+                    <ProgressBar
+                        android:id="@+id/stageRow3Bar"
+                        style="?android:attr/progressBarStyleHorizontal"
+                        android:layout_width="140dp"
+                        android:layout_height="10dp"
+                        android:layout_marginStart="8dp"
+                        android:progressDrawable="@drawable/progress_bar_module"
+                        android:max="100"
+                        android:progress="0" />
+                </LinearLayout>
+
+                <TextView
+                    android:id="@+id/stageRow3Value"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="0/0 g"
+                    android:textColor="#F1407A"
+                    android:textSize="12sp" />
+            </LinearLayout>
+
+            <LinearLayout
+                android:id="@+id/stageRow4Container"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="12dp"
+                android:orientation="vertical">
+
+                <TextView
+                    android:id="@+id/stageRow4Title"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="[STAGE] —"
+                    android:textColor="#18D1AE"
+                    android:textSize="14sp" />
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="6dp"
+                    android:orientation="horizontal">
+
+                    <TextView
+                        android:id="@+id/stageRow4Name"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="○ —"
+                        android:textColor="#18D1AE"
+                        android:textSize="14sp" />
+
+                    <ProgressBar
+                        android:id="@+id/stageRow4Bar"
+                        style="?android:attr/progressBarStyleHorizontal"
+                        android:layout_width="140dp"
+                        android:layout_height="10dp"
+                        android:layout_marginStart="8dp"
+                        android:progressDrawable="@drawable/progress_bar_module"
+                        android:max="100"
+                        android:progress="0" />
+                </LinearLayout>
+
+                <TextView
+                    android:id="@+id/stageRow4Value"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="0/0 g"
+                    android:textColor="#F1407A"
+                    android:textSize="12sp" />
+            </LinearLayout>
+
+            <LinearLayout
+                android:id="@+id/stageRow5Container"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="12dp"
+                android:orientation="vertical">
+
+                <TextView
+                    android:id="@+id/stageRow5Title"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="[STAGE] —"
+                    android:textColor="#18D1AE"
+                    android:textSize="14sp" />
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="6dp"
+                    android:orientation="horizontal">
+
+                    <TextView
+                        android:id="@+id/stageRow5Name"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="○ —"
+                        android:textColor="#18D1AE"
+                        android:textSize="14sp" />
+
+                    <ProgressBar
+                        android:id="@+id/stageRow5Bar"
+                        style="?android:attr/progressBarStyleHorizontal"
+                        android:layout_width="140dp"
+                        android:layout_height="10dp"
+                        android:layout_marginStart="8dp"
+                        android:progressDrawable="@drawable/progress_bar_module"
+                        android:max="100"
+                        android:progress="0" />
+                </LinearLayout>
+
+                <TextView
+                    android:id="@+id/stageRow5Value"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="0/0 g"
+                    android:textColor="#F1407A"
+                    android:textSize="12sp" />
+            </LinearLayout>
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="10dp"
+                android:orientation="horizontal">
+
+                <Switch
+                    android:id="@+id/autoSwitch"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Auto stage"
+                    android:checked="true" />
+
+                <Button
+                    android:id="@+id/resetRecipeButton"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="8dp"
+                    android:text="Reset Recipe"
+                    android:enabled="false" />
+
+                <Button
+                    android:id="@+id/nextStageButton"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="8dp"
+                    android:text="Next Stage"
+                    android:enabled="false" />
+            </LinearLayout>
+        </LinearLayout>
+
+        <TextView
+            android:id="@+id/statusText"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="Disconnected"
+            android:textColor="#8E8E8E"
+            android:textSize="12sp" />
+    </LinearLayout>
+</ScrollView>

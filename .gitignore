@@ -1,0 +1,27 @@
+# Android
+*.apk
+*.aar
+*.ap_
+*.aab
+build/
+.gradle/
+.idea/
+*.iml
+*.keystore
+local.properties
+
+# IDE
+.vscode/
+.DS_Store
+*.swp
+*.swo
+
+# Arduino
+.pio/
+.vscode/
+*.o
+*.a
+
+# Environment
+.env
+.env.local
