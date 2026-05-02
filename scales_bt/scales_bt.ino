@@ -19,12 +19,13 @@ NAU7802 myScale;
 const int NORMAL_READ_SAMPLES = 3;      // at 10SPS keeps UI responsive
 const int CAL_READ_SAMPLES = 32;        // better averaging for tare/span calibration
 const float WEIGHT_JUMP_THRESHOLD_G = 2.0f;
-const float FILTER_ALPHA = 0.10f;       // lower alpha = smoother readings
-const float ZERO_TRACK_BAND_G = 0.6f;   // only auto-zero when near zero
-const unsigned long ZERO_TRACK_DELAY_MS = 5000;
-const float ZERO_TRACK_BETA = 0.02f;    // slow drift compensation
+const float FILTER_ALPHA = 0.30f;       // tau ~0.9s at 10SPS/3-sample cycles
+const float ZERO_TRACK_BAND_G = 2.0f;   // wide enough to catch thermal warmup drift
+const unsigned long ZERO_TRACK_DELAY_MS = 2000;
+const float ZERO_TRACK_BETA = 0.05f;    // faster drift compensation
 const float INACTIVITY_DELTA_G = 0.2f;
 const unsigned long AUTO_OFF_TIMEOUT_MS = 10UL * 60UL * 1000UL;
+const unsigned long AFE_RECAL_INTERVAL_MS = 5UL * 60UL * 1000UL;
 
 const uint32_t CAL_STORE_MAGIC = 0x5343414Cu; // "SCAL"
 const char* CAL_STORE_FILE = "/scale_cal.bin";
@@ -123,7 +124,7 @@ void sendCalibrationValues() {
 }
 
 void loadCalibration() {
-  File file(InternalFileSystem);
+  File file(InternalFS);
   if (file.open(CAL_STORE_FILE, FILE_O_READ)) {
     CalibrationStore store;
     file.read(&store, sizeof(store));
@@ -137,10 +138,10 @@ void loadCalibration() {
 }
 
 void saveCalibration() {
-  File file(InternalFileSystem);
+  File file(InternalFS);
   if (file.open(CAL_STORE_FILE, FILE_O_WRITE)) {
     CalibrationStore store = {CAL_STORE_MAGIC, manualZero, calibrationFactor};
-    file.write(&store, sizeof(store));
+    file.write((uint8_t const *)&store, sizeof(store));
     file.close();
   }
 }
@@ -170,8 +171,8 @@ void setupBLE() {
   battChar.begin();
   battChar.write32(100);
 
-  Bluefruit.Advertising.addFlags(BLE_GAP_ADV_FLAGS_LE_ONLY_GENERAL_DISCOVERABLE_MODE);
-  Bluefruit.Advertising.addTxPowerLevel();
+  Bluefruit.Advertising.addFlags(BLE_GAP_ADV_FLAGS_LE_ONLY_GENERAL_DISC_MODE);
+  Bluefruit.Advertising.addTxPower();
   Bluefruit.Advertising.addService(scaleService);
   Bluefruit.Advertising.addName();
   Bluefruit.Advertising.start(0);
@@ -179,31 +180,32 @@ void setupBLE() {
 
 void updateDisplay() {
   u8g2.clearBuffer();
-  u8g2.setFont(u8g2_font_ncenB08_tr);
 
-  u8g2.drawStr(0, 10, "Weight:");
-  u8g2.setCursor(60, 10);
-  u8g2.print(displayWeight, 1);
-  u8g2.drawStr(100, 10, "g");
+  // Large weight number: baseline at y=40 (~2/3 of 64px screen)
+  u8g2.setFont(u8g2_font_fub35_tn);
+  char wStr[12];
+  snprintf(wStr, sizeof(wStr), "%.1f", displayWeight);
+  u8g2.setCursor(0, 40);
+  u8g2.print(wStr);
+  // Small "g" unit right after the number
+  u8g2.setFont(u8g2_font_ncenB14_tr);
+  u8g2.setCursor(u8g2.getStrWidth(wStr) + 2, 40);
+  u8g2.print("g");
+
+  // Bottom strip: timer/stage on the left, battery on the right
+  u8g2.setFont(u8g2_font_ncenB08_tr);
+  int battPercent = readBatteryPercent();
+  u8g2.setCursor(105, 63);
+  u8g2.printf("%d%%", battPercent);
 
   if (timerRunning) {
     unsigned long elapsed = (millis() - timerStartMs) / 1000;
-    unsigned long mins = elapsed / 60;
-    unsigned long secs = elapsed % 60;
-    u8g2.setCursor(0, 25);
-    u8g2.printf("Timer: %02lu:%02lu", mins, secs);
+    u8g2.setCursor(0, 63);
+    u8g2.printf("%lu:%02lu", elapsed / 60, elapsed % 60);
+  } else if (currentStageName.length() > 0) {
+    u8g2.setCursor(0, 63);
+    u8g2.printf("%.0fg %s", currentStageTarget, currentStageName.c_str());
   }
-
-  if (currentStageName.length() > 0) {
-    u8g2.setCursor(0, 40);
-    u8g2.print(currentStageName);
-    u8g2.setCursor(0, 55);
-    u8g2.printf("Target: %.1f g", currentStageTarget);
-  }
-
-  int battPercent = readBatteryPercent();
-  u8g2.setCursor(100, 64);
-  u8g2.printf("%d%%", battPercent);
 
   u8g2.sendBuffer();
 }
@@ -224,7 +226,7 @@ void setup() {
   u8g2.drawStr(0, 20, "Scale Boot...");
   u8g2.sendBuffer();
 
-  InternalFileSystem.begin();
+  InternalFS.begin();
   loadCalibration();
 
   Wire.begin();
@@ -257,11 +259,12 @@ void loop() {
 
   float calibratedWeight = (rawReading - manualZero) / calibrationFactor;
 
-  float lastDisplayWeight = displayWeight;
   if (abs(calibratedWeight - displayWeight) > WEIGHT_JUMP_THRESHOLD_G) {
-    displayWeight = lastDisplayWeight; // Reject jump
+    // Step change (weight placed/removed): snap immediately so zero-tracking
+    // doesn't misread a frozen near-zero display as "still empty"
+    displayWeight = calibratedWeight;
   } else {
-    displayWeight = displayWeight * (1.0 - FILTER_ALPHA) + calibratedWeight * FILTER_ALPHA;
+    displayWeight = displayWeight * (1.0f - FILTER_ALPHA) + calibratedWeight * FILTER_ALPHA;
   }
 
   if (abs(displayWeight) < ZERO_TRACK_BAND_G) {
@@ -308,19 +311,31 @@ void loop() {
     autoOffArmed = false;
   }
 
+  // Periodically recalibrate NAU7802 internal analog frontend to compensate
+  // for thermal offset drift of the amplifier (~1-3g shift during warmup).
+  // Only do it when scale is stable and near zero to avoid disturbing readings.
+  static unsigned long lastAfeCalMs = 0;
+  if (millis() - lastAfeCalMs > AFE_RECAL_INTERVAL_MS
+      && abs(displayWeight) < ZERO_TRACK_BAND_G
+      && nearZeroSinceMs != 0
+      && millis() - nearZeroSinceMs > ZERO_TRACK_DELAY_MS) {
+    myScale.calibrateAFE();
+    lastAfeCalMs = millis();
+  }
+
   static unsigned long lastWeightNotifyMs = 0;
   if (millis() - lastWeightNotifyMs > 100) {
-    float weightToSend = round(displayWeight * 10.0) / 10.0;
-    uint8_t weight_bytes[4];
-    memcpy(weight_bytes, &weightToSend, sizeof(weightToSend));
-    weightChar.write(weight_bytes, 4);
+    char weightStr[12];
+    snprintf(weightStr, sizeof(weightStr), "%.1f", round(displayWeight * 10.0) / 10.0);
+    weightChar.notify(weightStr, strlen(weightStr));
     lastWeightNotifyMs = millis();
     lastWeightActivityMs = millis();
   }
 
   if (millis() - lastBatteryNotifyMs > 30000) {
-    int battPercent = readBatteryPercent();
-    battChar.write32(battPercent);
+    char battStr[8];
+    snprintf(battStr, sizeof(battStr), "%d", readBatteryPercent());
+    battChar.notify(battStr, strlen(battStr));
     lastBatteryNotifyMs = millis();
   }
 

@@ -11,35 +11,28 @@ import android.bluetooth.BluetoothGattService
 import android.bluetooth.BluetoothManager
 import android.bluetooth.le.BluetoothLeScanner
 import android.bluetooth.le.ScanCallback
+import android.bluetooth.le.ScanFilter
 import android.bluetooth.le.ScanResult
+import android.bluetooth.le.ScanSettings
+import android.os.ParcelUuid
 import android.content.Context
 import android.content.SharedPreferences
 import android.content.pm.PackageManager
-import android.text.InputType
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
-import android.view.View
-import android.widget.EditText
-import android.widget.LinearLayout
-import android.widget.Button
-import android.widget.Switch
-import android.widget.TextView
-import android.widget.ProgressBar
 import android.widget.Toast
-import android.widget.Spinner
-import android.widget.ArrayAdapter
-import androidx.appcompat.app.AlertDialog
+import androidx.activity.compose.setContent
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
-import com.github.mikephil.charting.charts.LineChart
-import com.github.mikephil.charting.components.XAxis
-import com.github.mikephil.charting.data.Entry
-import com.github.mikephil.charting.data.LineData
-import com.github.mikephil.charting.data.LineDataSet
-import com.github.mikephil.charting.formatter.ValueFormatter
+import androidx.lifecycle.ViewModelProvider
+import com.example.scale.ui.model.Recipe
+import com.example.scale.ui.model.Stage
+import com.example.scale.ui.screens.BrewScreen
+import com.example.scale.ui.theme.ScaleTheme
+import com.example.scale.ui.viewmodel.BrewViewModel
 import org.json.JSONArray
 import org.json.JSONObject
 import java.nio.charset.StandardCharsets
@@ -47,54 +40,8 @@ import java.util.UUID
 
 class MainActivity : AppCompatActivity() {
 
-    private lateinit var statusText: TextView
-    private lateinit var modeText: TextView
-    private lateinit var timeText: TextView
-    private lateinit var weightText: TextView
-    private lateinit var flowText: TextView
-    private lateinit var batteryText: TextView
-    private lateinit var connectButton: Button
-    private lateinit var tareButton: Button
-    private lateinit var timerButton: Button
-    private lateinit var recipeToggleButton: Button
-    private lateinit var graphToggleButton: Button
-    private lateinit var calZeroButton: Button
-    private lateinit var calSpanButton: Button
-    private lateinit var calGetButton: Button
-    private lateinit var recipeTitle: TextView
-    private lateinit var stageRow1Title: TextView
-    private lateinit var stageRow1Name: TextView
-    private lateinit var stageRow1Bar: ProgressBar
-    private lateinit var stageRow1Value: TextView
-    private lateinit var stageRow2Title: TextView
-    private lateinit var stageRow2Name: TextView
-    private lateinit var stageRow2Bar: ProgressBar
-    private lateinit var stageRow2Value: TextView
-    private lateinit var stageRow3Title: TextView
-    private lateinit var stageRow3Name: TextView
-    private lateinit var stageRow3Bar: ProgressBar
-    private lateinit var stageRow3Value: TextView
-    private lateinit var stageRow4Title: TextView
-    private lateinit var stageRow4Name: TextView
-    private lateinit var stageRow4Bar: ProgressBar
-    private lateinit var stageRow4Value: TextView
-    private lateinit var stageRow5Title: TextView
-    private lateinit var stageRow5Name: TextView
-    private lateinit var stageRow5Bar: ProgressBar
-    private lateinit var stageRow5Value: TextView
-    private lateinit var stageRow1Container: android.view.View
-    private lateinit var stageRow2Container: android.view.View
-    private lateinit var stageRow3Container: android.view.View
-    private lateinit var stageRow4Container: android.view.View
-    private lateinit var stageRow5Container: android.view.View
-    private lateinit var autoSwitch: Switch
-    private lateinit var nextStageButton: Button
-    private lateinit var resetRecipeButton: Button
-    private lateinit var recipeSpinner: Spinner
-    private lateinit var addRecipeButton: Button
-    private lateinit var editRecipeButton: Button
-    private lateinit var recipePanel: android.view.View
-    private lateinit var weightChart: LineChart
+    private lateinit var viewModel: BrewViewModel
+    private lateinit var prefs: SharedPreferences
 
     private var bluetoothAdapter: BluetoothAdapter? = null
     private var scanner: BluetoothLeScanner? = null
@@ -120,42 +67,18 @@ class MainActivity : AppCompatActivity() {
     private var lastWeight = 0f
     private var lastWeightTime = 0L
     private var flowRate = 0f
-    private var recipeModeEnabled = false
-    private var graphVisible = false
-    private var sampleIndex = 0f
-    private var lineDataSet: LineDataSet? = null
     private var chartStartMs = 0L
-    private val chartMinWindowSec = 20f
-
-    private data class Stage(
-        val name: String,
-        val startSec: Int,
-        val endSec: Int,
-        val targetWeight: Float,
-        val note: String
-    )
-
-    private data class Recipe(
-        val title: String,
-        val stages: MutableList<Stage>
-    )
-
-    private lateinit var prefs: SharedPreferences
-    private val recipes = mutableListOf<Recipe>()
-    private lateinit var recipeAdapter: ArrayAdapter<String>
-    private var currentRecipeIndex = 0
     private var currentStageIndex = 0
+
     private val timerTick = object : Runnable {
         override fun run() {
             if (timerRunning) {
-                val elapsed = (System.currentTimeMillis() - timerStartMs) / 1000
-                val minutes = elapsed / 60
-                val seconds = elapsed % 60
-                timeText.text = "TIME: " + String.format("%02d:%02d", minutes, seconds)
-                if (autoSwitch.isChecked) {
-                    updateStageByTime(elapsed.toInt())
+                val elapsedSec = (System.currentTimeMillis() - timerStartMs) / 1000f
+                viewModel.elapsedSeconds.value = elapsedSec
+                if (viewModel.recipeModeEnabled.value && viewModel.autoStageMode.value) {
+                    updateStageByTime(elapsedSec.toInt())
                 }
-                handler.postDelayed(this, 1000)
+                handler.postDelayed(this, 250)
             }
         }
     }
@@ -168,105 +91,79 @@ class MainActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setContentView(R.layout.activity_main)
 
-        statusText = findViewById(R.id.statusText)
-        modeText = findViewById(R.id.modeText)
-        timeText = findViewById(R.id.timeText)
-        weightText = findViewById(R.id.weightText)
-        flowText = findViewById(R.id.flowText)
-        batteryText = findViewById(R.id.batteryText)
-        connectButton = findViewById(R.id.connectButton)
-        tareButton = findViewById(R.id.tareButton)
-        timerButton = findViewById(R.id.timerButton)
-        recipeToggleButton = findViewById(R.id.recipeToggleButton)
-        graphToggleButton = findViewById(R.id.graphToggleButton)
-        calZeroButton = findViewById(R.id.calZeroButton)
-        calSpanButton = findViewById(R.id.calSpanButton)
-        calGetButton = findViewById(R.id.calGetButton)
-        recipeTitle = findViewById(R.id.recipeTitle)
-        stageRow1Title = findViewById(R.id.stageRow1Title)
-        stageRow1Name = findViewById(R.id.stageRow1Name)
-        stageRow1Bar = findViewById(R.id.stageRow1Bar)
-        stageRow1Value = findViewById(R.id.stageRow1Value)
-        stageRow2Title = findViewById(R.id.stageRow2Title)
-        stageRow2Name = findViewById(R.id.stageRow2Name)
-        stageRow2Bar = findViewById(R.id.stageRow2Bar)
-        stageRow2Value = findViewById(R.id.stageRow2Value)
-        stageRow3Title = findViewById(R.id.stageRow3Title)
-        stageRow3Name = findViewById(R.id.stageRow3Name)
-        stageRow3Bar = findViewById(R.id.stageRow3Bar)
-        stageRow3Value = findViewById(R.id.stageRow3Value)
-        stageRow4Title = findViewById(R.id.stageRow4Title)
-        stageRow4Name = findViewById(R.id.stageRow4Name)
-        stageRow4Bar = findViewById(R.id.stageRow4Bar)
-        stageRow4Value = findViewById(R.id.stageRow4Value)
-        stageRow5Title = findViewById(R.id.stageRow5Title)
-        stageRow5Name = findViewById(R.id.stageRow5Name)
-        stageRow5Bar = findViewById(R.id.stageRow5Bar)
-        stageRow5Value = findViewById(R.id.stageRow5Value)
-        stageRow1Container = findViewById(R.id.stageRow1Container)
-        stageRow2Container = findViewById(R.id.stageRow2Container)
-        stageRow3Container = findViewById(R.id.stageRow3Container)
-        stageRow4Container = findViewById(R.id.stageRow4Container)
-        stageRow5Container = findViewById(R.id.stageRow5Container)
-        autoSwitch = findViewById(R.id.autoSwitch)
-        nextStageButton = findViewById(R.id.nextStageButton)
-        resetRecipeButton = findViewById(R.id.resetRecipeButton)
-        recipeSpinner = findViewById(R.id.recipeSpinner)
-        addRecipeButton = findViewById(R.id.addRecipeButton)
-        editRecipeButton = findViewById(R.id.editRecipeButton)
-        recipePanel = findViewById(R.id.recipePanel)
-        weightChart = findViewById(R.id.weightChart)
         prefs = getSharedPreferences("scale_prefs", Context.MODE_PRIVATE)
+        viewModel = ViewModelProvider(this)[BrewViewModel::class.java]
 
         loadRecipesFromPrefs()
-        if (recipes.isEmpty()) {
-            recipes.addAll(defaultRecipes())
+        if (viewModel.recipes.value.isNullOrEmpty()) {
+            viewModel.recipes.value = defaultRecipes()
             saveRecipesToPrefs()
         }
+
+        wireViewModelCallbacks()
 
         val bm = getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager
         bluetoothAdapter = bm.adapter
         scanner = bluetoothAdapter?.bluetoothLeScanner
 
-        connectButton.setOnClickListener {
-            if (gatt != null) {
-                disconnect()
-            } else {
-                ensurePermissionsAndScan()
+        setContent {
+            ScaleTheme {
+                BrewScreen(viewModel)
             }
         }
-        tareButton.setOnClickListener { sendCommand("TARE") }
-        timerButton.setOnClickListener { toggleTimer() }
-        recipeToggleButton.setOnClickListener { toggleRecipeMode() }
-        graphToggleButton.setOnClickListener { toggleGraph() }
-        calZeroButton.setOnClickListener {
+    }
+
+    private fun wireViewModelCallbacks() {
+        viewModel.onConnectToggle = {
+            if (gatt != null) disconnect() else ensurePermissionsAndScan()
+        }
+        viewModel.onTare = { sendCommand("TARE") }
+        viewModel.onToggleTimer = { toggleTimer() }
+        viewModel.onCalZero = {
             sendCommand("CAL:ZERO")
             showToast("CAL:ZERO sent")
         }
-        calSpanButton.setOnClickListener { showCalSpanDialog() }
-        calGetButton.setOnClickListener {
+        viewModel.onCalSpan = { grams ->
+            sendCommand("CAL:SPAN:$grams")
+            showToast("CAL:SPAN sent")
+        }
+        viewModel.onCalGet = {
             sendCommand("CAL:GET")
-            showToast("CAL:GET sent (check Serial)")
+            showToast("CAL:GET sent")
         }
-        nextStageButton.setOnClickListener { advanceStageManual() }
-        resetRecipeButton.setOnClickListener { resetRecipe(true) }
-        addRecipeButton.setOnClickListener { showRecipeEditorDialog(isEdit = false) }
-        editRecipeButton.setOnClickListener { showRecipeEditorDialog(isEdit = true) }
-        autoSwitch.setOnCheckedChangeListener { _, isChecked ->
-            nextStageButton.isEnabled = !isChecked && gatt != null
-            modeText.text = "MODE: " + if (isChecked) "Auto" else "Manual"
+        viewModel.onSelectRecipe = { idx ->
+            val list = viewModel.recipes.value
+            if (list != null && idx in list.indices) {
+                viewModel.currentRecipeIndex.value = idx
+                resetRecipe(stopTimerToo = true)
+            }
         }
-
-        modeText.text = "MODE: Auto"
-        recipePanel.visibility = android.view.View.GONE
-        weightChart.visibility = android.view.View.GONE
-        setupChart()
-        setupRecipeSpinner()
-        updateStageUI()
-
-        updateUi("Disconnected")
+        viewModel.onSaveRecipe = { idx, recipe ->
+            val current = viewModel.recipes.value.orEmpty().toMutableList()
+            if (idx != null && idx in current.indices) {
+                current[idx] = recipe
+            } else {
+                current.add(recipe)
+                viewModel.currentRecipeIndex.value = current.lastIndex
+            }
+            viewModel.recipes.value = current
+            saveRecipesToPrefs()
+            resetRecipe(stopTimerToo = true)
+        }
+        viewModel.onDeleteRecipe = { idx ->
+            val current = viewModel.recipes.value.orEmpty().toMutableList()
+            if (idx in current.indices) {
+                current.removeAt(idx)
+                viewModel.recipes.value = current
+                viewModel.currentRecipeIndex.value =
+                    (viewModel.currentRecipeIndex.value ?: 0).coerceAtMost(current.lastIndex.coerceAtLeast(0))
+                saveRecipesToPrefs()
+                resetRecipe(stopTimerToo = true)
+            }
+        }
+        viewModel.onAdvanceStage = { advanceStageManual() }
+        viewModel.onResetRecipe = { resetRecipe(stopTimerToo = true) }
     }
 
     private fun ensurePermissionsAndScan() {
@@ -291,28 +188,38 @@ class MainActivity : AppCompatActivity() {
         startScan()
     }
 
-    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
+    override fun onRequestPermissionsResult(
+        requestCode: Int,
+        permissions: Array<out String>,
+        grantResults: IntArray,
+    ) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
         if (requestCode == 1001) {
             val allGranted = grantResults.isNotEmpty() && grantResults.all { it == PackageManager.PERMISSION_GRANTED }
-            if (allGranted) startScan() else updateUi("Permission denied")
+            if (allGranted) startScan() else updateStatus("Permission denied")
         }
     }
 
     @android.annotation.SuppressLint("MissingPermission")
     private fun startScan() {
         if (scanner == null) {
-            updateUi("Bluetooth not available")
+            updateStatus("Bluetooth not available")
             return
         }
-        updateUi("Scanning...")
-        weightText.text = "—"
-        batteryText.text = "BAT: --%"
+        updateStatus("Scanning…")
+        viewModel.weight.value = 0f
+        viewModel.battery.value = null
 
-        scanner?.startScan(scanCallback)
+        val filter = ScanFilter.Builder()
+            .setServiceUuid(ParcelUuid(serviceUuid))
+            .build()
+        val settings = ScanSettings.Builder()
+            .setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY)
+            .build()
+        scanner?.startScan(listOf(filter), settings, scanCallback)
         handler.postDelayed({
             stopScan()
-            if (gatt == null) updateUi("Not found")
+            if (gatt == null) updateStatus("Not found")
         }, scanTimeoutMs)
     }
 
@@ -323,12 +230,13 @@ class MainActivity : AppCompatActivity() {
 
     private val scanCallback = object : ScanCallback() {
         override fun onScanResult(callbackType: Int, result: ScanResult) {
-            val name = result.device.name ?: ""
-            if (name.equals("Scale", ignoreCase = true)) {
-                stopScan()
-                updateUi("Connecting...")
-                connect(result.device.address)
-            }
+            stopScan()
+            updateStatus("Connecting…")
+            connect(result.device.address)
+        }
+
+        override fun onScanFailed(errorCode: Int) {
+            updateStatus("Scan failed: $errorCode")
         }
     }
 
@@ -346,10 +254,13 @@ class MainActivity : AppCompatActivity() {
     private val gattCallback = object : BluetoothGattCallback() {
         override fun onConnectionStateChange(gatt: BluetoothGatt, status: Int, newState: Int) {
             if (newState == BluetoothGatt.STATE_CONNECTED) {
-                runOnUiThread { updateUi("Discovering services...") }
+                runOnUiThread { updateStatus("Discovering…") }
                 gatt.discoverServices()
             } else {
-                runOnUiThread { updateUi("Disconnected") }
+                runOnUiThread {
+                    setConnected(false)
+                    updateStatus("Disconnected")
+                }
                 disconnect()
             }
         }
@@ -360,93 +271,130 @@ class MainActivity : AppCompatActivity() {
             ctrlChar = service?.getCharacteristic(ctrlCharUuid)
             battChar = service?.getCharacteristic(battCharUuid)
             if (weightChar == null || ctrlChar == null) {
-                runOnUiThread { updateUi("Characteristic not found") }
+                runOnUiThread { updateStatus("Characteristic not found") }
                 return
             }
 
             gatt.setCharacteristicNotification(weightChar, true)
             val cccd = weightChar?.getDescriptor(cccdUuid)
-            cccd?.value = BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE
-            gatt.writeDescriptor(cccd)
-
+            if (cccd != null) {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                    gatt.writeDescriptor(cccd, BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE)
+                } else {
+                    @Suppress("DEPRECATION")
+                    cccd.value = BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE
+                    @Suppress("DEPRECATION")
+                    gatt.writeDescriptor(cccd)
+                }
+            } else {
+                runOnUiThread { updateStatus("Notify descriptor missing") }
+            }
             runOnUiThread {
-                updateUi("Connected")
+                setConnected(true)
+                updateStatus("Scale 02")
+                resetChart()
+            }
+        }
+
+        override fun onDescriptorWrite(
+            gatt: BluetoothGatt,
+            descriptor: BluetoothGattDescriptor,
+            status: Int,
+        ) {
+            runOnUiThread {
                 handler.removeCallbacks(batteryPollTick)
                 readBatteryOnce()
                 handler.postDelayed(batteryPollTick, 15000)
             }
         }
 
+        @Suppress("DEPRECATION")
         override fun onCharacteristicRead(
             gatt: BluetoothGatt,
             characteristic: BluetoothGattCharacteristic,
-            status: Int
+            status: Int,
+        ) {
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
+                handleCharacteristicRead(characteristic, characteristic.value ?: return, status)
+            }
+        }
+
+        override fun onCharacteristicRead(
+            gatt: BluetoothGatt,
+            characteristic: BluetoothGattCharacteristic,
+            value: ByteArray,
+            status: Int,
+        ) {
+            handleCharacteristicRead(characteristic, value, status)
+        }
+
+        private fun handleCharacteristicRead(
+            characteristic: BluetoothGattCharacteristic,
+            raw: ByteArray,
+            status: Int,
         ) {
             if (status == BluetoothGatt.GATT_SUCCESS && characteristic.uuid == battCharUuid) {
-                val raw = characteristic.value ?: return
-                val value = String(raw, StandardCharsets.US_ASCII).trim()
-                val pct = value.toIntOrNull()
+                val pct = String(raw, StandardCharsets.US_ASCII).trim().toIntOrNull()
                 runOnUiThread {
-                    if (pct != null) {
-                        batteryText.text = "BAT: ${pct.coerceIn(0, 100)}%"
-                    }
+                    if (pct != null) viewModel.battery.value = pct.coerceIn(0, 100)
                 }
             }
         }
 
-        override fun onCharacteristicChanged(gatt: BluetoothGatt, characteristic: BluetoothGattCharacteristic) {
-        if (characteristic.uuid == battCharUuid) {
-                val raw = characteristic.value ?: return
-                val value = String(raw, StandardCharsets.US_ASCII).trim()
-                val pct = value.toIntOrNull()
+        @Suppress("DEPRECATION")
+        override fun onCharacteristicChanged(
+            gatt: BluetoothGatt,
+            characteristic: BluetoothGattCharacteristic,
+        ) {
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
+                handleCharacteristicChanged(characteristic, characteristic.value ?: return)
+            }
+        }
+
+        override fun onCharacteristicChanged(
+            gatt: BluetoothGatt,
+            characteristic: BluetoothGattCharacteristic,
+            value: ByteArray,
+        ) {
+            handleCharacteristicChanged(characteristic, value)
+        }
+
+        private fun handleCharacteristicChanged(
+            characteristic: BluetoothGattCharacteristic,
+            raw: ByteArray,
+        ) {
+            if (characteristic.uuid == battCharUuid) {
+                val pct = String(raw, StandardCharsets.US_ASCII).trim().toIntOrNull()
                 runOnUiThread {
-                    if (pct != null) {
-                        batteryText.text = "BAT: ${pct.coerceIn(0, 100)}%"
-                    }
+                    if (pct != null) viewModel.battery.value = pct.coerceIn(0, 100)
                 }
             } else if (characteristic.uuid == weightCharUuid) {
-                val raw = characteristic.value ?: return
-                val filtered = raw.filter { b ->
-                    val v = b.toInt() and 0xFF
-                    v in 32..126
-                }.toByteArray()
-                val value = String(filtered, StandardCharsets.US_ASCII).trim()
-                if (value.isNotEmpty()) {
-                    val parsed = value.replace(',', '.').toFloatOrNull()
-                    runOnUiThread {
-                        weightText.text = "WEIGHT: $value g"
-                        if (parsed != null) {
-                            updateFlow(parsed)
-                            addChartPoint(parsed)
-                            autoSyncTimer(parsed)
-                            if (recipeModeEnabled) {
-                                if (autoSwitch.isChecked && timerRunning) {
-                                    val elapsed = ((System.currentTimeMillis() - timerStartMs) / 1000).toInt()
-                                    updateStageByTime(elapsed)
-                                }
-                                updateStageProgress(parsed)
-                            }
-                        }
-                    }
-                }
+                val text = String(raw, StandardCharsets.US_ASCII).trim()
+                val parsed = text.replace(',', '.').toFloatOrNull() ?: return
+                runOnUiThread { onWeightSample(parsed) }
             }
         }
     }
 
-    private fun updateUi(status: String) {
-        statusText.text = status
-        connectButton.text = if (gatt == null) "Connect" else "Disconnect"
-        val connected = gatt != null
-        tareButton.isEnabled = connected
-        timerButton.isEnabled = connected
-        recipeToggleButton.isEnabled = connected
-        graphToggleButton.isEnabled = connected
-        calZeroButton.isEnabled = connected
-        calSpanButton.isEnabled = connected
-        calGetButton.isEnabled = connected
-        nextStageButton.isEnabled = connected && !autoSwitch.isChecked
-        resetRecipeButton.isEnabled = connected
-        modeText.text = "MODE: " + if (autoSwitch.isChecked) "Auto" else "Manual"
+    private fun onWeightSample(weight: Float) {
+        viewModel.weight.value = weight
+        updateFlow(weight)
+        addChartPoint(weight)
+        autoSyncTimer(weight)
+        if (viewModel.recipeModeEnabled.value) {
+            if (viewModel.autoStageMode.value && timerRunning) {
+                val elapsed = ((System.currentTimeMillis() - timerStartMs) / 1000).toInt()
+                updateStageByTime(elapsed)
+            }
+        }
+    }
+
+    private fun setConnected(value: Boolean) {
+        viewModel.connected.value = value
+    }
+
+    private fun updateStatus(text: String) {
+        viewModel.connectionStatus.value = text
     }
 
     @android.annotation.SuppressLint("MissingPermission")
@@ -461,8 +409,9 @@ class MainActivity : AppCompatActivity() {
         stopTimer()
         resetRecipe(false)
         resetChart()
-        batteryText.text = "BAT: --%"
-        updateUi("Disconnected")
+        viewModel.battery.value = null
+        setConnected(false)
+        updateStatus("Disconnected")
     }
 
     @android.annotation.SuppressLint("MissingPermission")
@@ -480,23 +429,22 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun toggleTimer() {
-        if (!timerRunning) startTimer()
-        else stopTimer()
+        if (!timerRunning) startTimer() else stopTimer()
     }
 
     private fun stopTimer() {
         timerRunning = false
+        viewModel.timerRunning.value = false
         handler.removeCallbacks(timerTick)
-        timerButton.text = "Start/Stop"
         sendCommand("TIMER:STOP")
         belowThresholdSinceMs = 0L
     }
 
     private fun startTimer() {
         timerRunning = true
+        viewModel.timerRunning.value = true
         timerStartMs = System.currentTimeMillis()
-        timerButton.text = "Start/Stop"
-        timeText.text = "TIME: 00:00"
+        viewModel.elapsedSeconds.value = 0f
         handler.removeCallbacks(timerTick)
         handler.post(timerTick)
         sendCommand("TIMER:START")
@@ -506,63 +454,61 @@ class MainActivity : AppCompatActivity() {
         Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
     }
 
-    private fun defaultRecipes(): List<Recipe> {
-        return listOf(
-            Recipe(
-                "Decaf V60",
-                mutableListOf(
-                    Stage("Bloom", 0, 40, 50f, "Wet all grounds, wait 40s"),
-                    Stage("Pour 1", 40, 75, 180f, "Slow circular pour to 180g"),
-                    Stage("Pour 2", 75, 105, 320f, "Finish to 320g, thin stream")
-                )
+    private fun defaultRecipes(): List<Recipe> = listOf(
+        Recipe(
+            "Decaf V60",
+            listOf(
+                Stage("Bloom", 0, 40, 50f, "Wet all grounds, wait 40s"),
+                Stage("Pour 1", 40, 75, 180f, "Slow circular pour to 180g"),
+                Stage("Pour 2", 75, 105, 320f, "Finish to 320g, thin stream"),
             ),
-            Recipe(
-                "4:6 (3 pours)",
-                mutableListOf(
-                    Stage("Pour 1", 0, 30, 60f, "Center pour to 60g"),
-                    Stage("Pour 2", 30, 60, 150f, "Circle to 150g"),
-                    Stage("Pour 3", 60, 120, 300f, "Finish to 300g")
-                )
+        ),
+        Recipe(
+            "4:6 (3 pours)",
+            listOf(
+                Stage("Pour 1", 0, 30, 60f, "Center pour to 60g"),
+                Stage("Pour 2", 30, 60, 150f, "Circle to 150g"),
+                Stage("Pour 3", 60, 120, 300f, "Finish to 300g"),
             ),
-            Recipe(
-                "Hoffmann V60",
-                mutableListOf(
-                    Stage("Bloom", 0, 45, 60f, "Bloom 2x dose"),
-                    Stage("Main Pour", 45, 120, 300f, "Continuous pour to 300g")
-                )
+        ),
+        Recipe(
+            "Hoffmann V60",
+            listOf(
+                Stage("Bloom", 0, 45, 60f, "Bloom 2x dose"),
+                Stage("Main Pour", 45, 120, 300f, "Continuous pour to 300g"),
             ),
-            Recipe(
-                "Tetsu 4:6 (5 pours)",
-                mutableListOf(
-                    Stage("Pour 1", 0, 30, 50f, "Start sweet"),
-                    Stage("Pour 2", 30, 60, 100f, "Balance"),
-                    Stage("Pour 3", 60, 90, 160f, "Strength"),
-                    Stage("Pour 4", 90, 120, 220f, "Body"),
-                    Stage("Pour 5", 120, 150, 300f, "Finish")
-                )
+        ),
+        Recipe(
+            "Tetsu 4:6 (5 pours)",
+            listOf(
+                Stage("Pour 1", 0, 30, 50f, "Start sweet"),
+                Stage("Pour 2", 30, 60, 100f, "Balance"),
+                Stage("Pour 3", 60, 90, 160f, "Strength"),
+                Stage("Pour 4", 90, 120, 220f, "Body"),
+                Stage("Pour 5", 120, 150, 300f, "Finish"),
             ),
-            Recipe(
-                "Kalita 155",
-                mutableListOf(
-                    Stage("Bloom", 0, 30, 40f, "Short bloom"),
-                    Stage("Pour 1", 30, 70, 120f, "Steady pour"),
-                    Stage("Pour 2", 70, 110, 200f, "Finish")
-                )
+        ),
+        Recipe(
+            "Kalita 155",
+            listOf(
+                Stage("Bloom", 0, 30, 40f, "Short bloom"),
+                Stage("Pour 1", 30, 70, 120f, "Steady pour"),
+                Stage("Pour 2", 70, 110, 200f, "Finish"),
             ),
-            Recipe(
-                "Bypass Iced",
-                mutableListOf(
-                    Stage("Bloom", 0, 30, 40f, "Bloom"),
-                    Stage("Pour", 30, 90, 180f, "Brew concentrate"),
-                    Stage("Bypass", 90, 90, 300f, "Add ice/water to 300g")
-                )
-            )
-        )
-    }
+        ),
+        Recipe(
+            "Bypass Iced",
+            listOf(
+                Stage("Bloom", 0, 30, 40f, "Bloom"),
+                Stage("Pour", 30, 90, 180f, "Brew concentrate"),
+                Stage("Bypass", 90, 90, 300f, "Add ice/water to 300g"),
+            ),
+        ),
+    )
 
     private fun saveRecipesToPrefs() {
         val root = JSONArray()
-        for (recipe in recipes) {
+        for (recipe in viewModel.recipes.value.orEmpty()) {
             val recipeObj = JSONObject()
             recipeObj.put("title", recipe.title)
             val stagesArray = JSONArray()
@@ -582,10 +528,10 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun loadRecipesFromPrefs() {
-        recipes.clear()
         val raw = prefs.getString("recipes_json", null) ?: return
         try {
             val root = JSONArray(raw)
+            val list = mutableListOf<Recipe>()
             for (i in 0 until root.length()) {
                 val recipeObj = root.optJSONObject(i) ?: continue
                 val title = recipeObj.optString("title", "").trim()
@@ -602,250 +548,63 @@ class MainActivity : AppCompatActivity() {
                             startSec = stageObj.optInt("startSec", 0),
                             endSec = stageObj.optInt("endSec", 0),
                             targetWeight = stageObj.optDouble("targetWeight", 0.0).toFloat(),
-                            note = stageObj.optString("note", "")
-                        )
+                            note = stageObj.optString("note", ""),
+                        ),
                     )
                 }
-                if (stages.isNotEmpty()) {
-                    recipes.add(Recipe(title, stages))
-                }
+                if (stages.isNotEmpty()) list.add(Recipe(title, stages))
             }
+            viewModel.recipes.value = list
         } catch (_: Exception) {
-            recipes.clear()
+            viewModel.recipes.value = emptyList()
         }
-    }
-
-    private fun showCalSpanDialog() {
-        val input = EditText(this).apply {
-            hint = "Known weight in grams (e.g. 200)"
-            inputType = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL
-        }
-        AlertDialog.Builder(this)
-            .setTitle("Calibration Span")
-            .setMessage("Place known weight on scale, then send command.")
-            .setView(input)
-            .setNegativeButton("Cancel", null)
-            .setPositiveButton("Send") { _, _ ->
-                val grams = input.text.toString().trim().replace(',', '.').toFloatOrNull()
-                if (grams == null || grams <= 0f) {
-                    showToast("Invalid weight")
-                    return@setPositiveButton
-                }
-                sendCommand("CAL:SPAN:$grams")
-                showToast("CAL:SPAN sent")
-            }
-            .show()
-    }
-
-    private data class StageRowInputs(
-        val root: LinearLayout,
-        val nameInput: EditText,
-        val startInput: EditText,
-        val endInput: EditText,
-        val targetInput: EditText
-    )
-
-    private fun showRecipeEditorDialog(isEdit: Boolean) {
-        if (isEdit && recipes.isEmpty()) {
-            showToast("No recipe to edit")
-            return
-        }
-
-        val recipeToEdit = if (isEdit) recipes[currentRecipeIndex] else null
-        val container = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(24, 24, 24, 8)
-        }
-
-        val titleInput = EditText(this).apply {
-            hint = "Recipe name"
-            setText(recipeToEdit?.title ?: "")
-        }
-        container.addView(titleInput)
-
-        val stageList = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-        }
-        container.addView(stageList)
-
-        val rows = mutableListOf<StageRowInputs>()
-
-        fun addStageRow(defaultName: String, defaultStart: Int, defaultEnd: Int, defaultTarget: Float) {
-            val row = LinearLayout(this).apply {
-                orientation = LinearLayout.VERTICAL
-                setPadding(0, 18, 0, 0)
-            }
-            val nameInput = EditText(this).apply {
-                hint = "Step name"
-                setText(defaultName)
-            }
-            val startInput = EditText(this).apply {
-                hint = "Start sec"
-                inputType = InputType.TYPE_CLASS_NUMBER
-                setText(defaultStart.toString())
-            }
-            val endInput = EditText(this).apply {
-                hint = "End sec"
-                inputType = InputType.TYPE_CLASS_NUMBER
-                setText(defaultEnd.toString())
-            }
-            val targetInput = EditText(this).apply {
-                hint = "Target g"
-                inputType = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL
-                setText(if (defaultTarget % 1f == 0f) defaultTarget.toInt().toString() else defaultTarget.toString())
-            }
-            val removeButton = Button(this).apply {
-                text = "Remove step"
-                setOnClickListener {
-                    stageList.removeView(row)
-                    rows.removeAll { it.root == row }
-                }
-            }
-
-            row.addView(nameInput)
-            row.addView(startInput)
-            row.addView(endInput)
-            row.addView(targetInput)
-            row.addView(removeButton)
-            stageList.addView(row)
-            rows.add(StageRowInputs(row, nameInput, startInput, endInput, targetInput))
-        }
-
-        if (recipeToEdit != null) {
-            for (stage in recipeToEdit.stages) {
-                addStageRow(stage.name, stage.startSec, stage.endSec, stage.targetWeight)
-            }
-        } else {
-            addStageRow("Step 1", 0, 30, 50f)
-        }
-
-        val addStepButton = Button(this).apply {
-            text = "Add step"
-            setOnClickListener {
-                val last = rows.lastOrNull()
-                if (last == null) {
-                    addStageRow("Step 1", 0, 30, 50f)
-                } else {
-                    val index = rows.size + 1
-                    val prevEnd = last.endInput.text.toString().trim().toIntOrNull() ?: 0
-                    val prevTarget = last.targetInput.text.toString().trim().replace(',', '.').toFloatOrNull() ?: 0f
-                    addStageRow("Step $index", prevEnd, prevEnd + 30, prevTarget + 50f)
-                }
-            }
-        }
-        container.addView(addStepButton)
-
-        val dialogTitle = if (isEdit) "Edit Recipe" else "Add Recipe"
-        AlertDialog.Builder(this)
-            .setTitle(dialogTitle)
-            .setView(container)
-            .setNegativeButton("Cancel", null)
-            .setPositiveButton("Save") { _, _ ->
-                val title = titleInput.text.toString().trim()
-                if (title.isEmpty()) {
-                    showToast("Recipe name is required")
-                    return@setPositiveButton
-                }
-                if (rows.isEmpty()) {
-                    showToast("At least one step is required")
-                    return@setPositiveButton
-                }
-
-                val stages = mutableListOf<Stage>()
-                for (row in rows) {
-                    val name = row.nameInput.text.toString().trim()
-                    val start = row.startInput.text.toString().trim().toIntOrNull()
-                    val end = row.endInput.text.toString().trim().toIntOrNull()
-                    val target = row.targetInput.text.toString().trim().replace(',', '.').toFloatOrNull()
-                    if (name.isEmpty() || start == null || end == null || target == null) {
-                        showToast("Invalid step fields")
-                        return@setPositiveButton
-                    }
-                    if (end < start) {
-                        showToast("Step end time must be >= start time")
-                        return@setPositiveButton
-                    }
-                    stages.add(Stage(name, start, end, target, ""))
-                }
-
-                if (isEdit) {
-                    recipes[currentRecipeIndex] = Recipe(title, stages)
-                } else {
-                    recipes.add(Recipe(title, stages))
-                    currentRecipeIndex = recipes.lastIndex
-                }
-                saveRecipesToPrefs()
-                refreshRecipeSpinner()
-                resetRecipe(true)
-            }
-            .show()
     }
 
     private fun updateStageByTime(elapsedSec: Int) {
-        if (!recipeModeEnabled || recipes.isEmpty()) return
-        val stages = recipes[currentRecipeIndex].stages
+        val recipes = viewModel.recipes.value.orEmpty()
+        if (recipes.isEmpty()) return
+        val idx = viewModel.currentRecipeIndex.value ?: 0
+        val stages = recipes.getOrNull(idx)?.stages ?: return
         if (stages.isEmpty()) return
-        val idx = stages.indexOfFirst { elapsedSec < it.endSec }
-        val newIndex = if (idx == -1) stages.lastIndex + 1 else idx
+        val first = stages.indexOfFirst { elapsedSec < it.endSec }
+        val newIndex = if (first == -1) stages.lastIndex + 1 else first
         if (newIndex != currentStageIndex) {
             currentStageIndex = newIndex
-            updateStageUI()
+            viewModel.stageIndex.value = newIndex
+            broadcastStageCommand()
         }
     }
 
     private fun advanceStageManual() {
-        if (!recipeModeEnabled || recipes.isEmpty()) return
+        if (!viewModel.recipeModeEnabled.value) return
+        val recipes = viewModel.recipes.value.orEmpty()
+        if (recipes.isEmpty()) return
         if (!timerRunning) startTimer()
-        val stages = recipes[currentRecipeIndex].stages
+        val stages = recipes.getOrNull(viewModel.currentRecipeIndex.value ?: 0)?.stages ?: return
         if (stages.isEmpty()) return
         if (currentStageIndex <= stages.lastIndex) {
             currentStageIndex += 1
-            updateStageUI()
+            viewModel.stageIndex.value = currentStageIndex
+            broadcastStageCommand()
         }
     }
 
-    private fun updateStageUI() {
-        if (!recipeModeEnabled || recipes.isEmpty()) {
+    private fun broadcastStageCommand() {
+        val recipes = viewModel.recipes.value.orEmpty()
+        val recipe = recipes.getOrNull(viewModel.currentRecipeIndex.value ?: 0) ?: return
+        val stage = recipe.stages.getOrNull(currentStageIndex)
+        if (stage != null) {
+            sendCommand("STAGE:${stage.name}|${stage.targetWeight.toInt()}")
+        } else {
             sendCommand("STAGE:|0")
-            return
-        }
-        val recipe = recipes[currentRecipeIndex]
-        recipeTitle.text = "RECIPE: ${recipe.title}"
-        if (currentStageIndex > recipe.stages.lastIndex) {
-            setStageRow(stageRow1Container, stageRow1Title, stageRow1Name, stageRow1Bar, stageRow1Value, null, true)
-            setStageRow(stageRow2Container, stageRow2Title, stageRow2Name, stageRow2Bar, stageRow2Value, null, false)
-            setStageRow(stageRow3Container, stageRow3Title, stageRow3Name, stageRow3Bar, stageRow3Value, null, false)
-            setStageRow(stageRow4Container, stageRow4Title, stageRow4Name, stageRow4Bar, stageRow4Value, null, false)
-            setStageRow(stageRow5Container, stageRow5Title, stageRow5Name, stageRow5Bar, stageRow5Value, null, false)
-            sendCommand("STAGE:|0")
-            return
-        }
-        val current = recipe.stages.getOrNull(currentStageIndex)
-        val next1 = recipe.stages.getOrNull(currentStageIndex + 1)
-        val next2 = recipe.stages.getOrNull(currentStageIndex + 2)
-        val next3 = recipe.stages.getOrNull(currentStageIndex + 3)
-        val next4 = recipe.stages.getOrNull(currentStageIndex + 4)
-        setStageRow(stageRow1Container, stageRow1Title, stageRow1Name, stageRow1Bar, stageRow1Value, current, true)
-        setStageRow(stageRow2Container, stageRow2Title, stageRow2Name, stageRow2Bar, stageRow2Value, next1, false)
-        setStageRow(stageRow3Container, stageRow3Title, stageRow3Name, stageRow3Bar, stageRow3Value, next2, false)
-        setStageRow(stageRow4Container, stageRow4Title, stageRow4Name, stageRow4Bar, stageRow4Value, next3, false)
-        setStageRow(stageRow5Container, stageRow5Title, stageRow5Name, stageRow5Bar, stageRow5Value, next4, false)
-        if (current != null) {
-            sendCommand("STAGE:${current.name}|${current.targetWeight.toInt()}")
         }
     }
 
     private fun resetRecipe(stopTimerToo: Boolean) {
         if (stopTimerToo && timerRunning) stopTimer()
         currentStageIndex = 0
+        viewModel.stageIndex.value = 0
         sendCommand("STAGE:|0")
-        updateStageUI()
-    }
-
-    private fun formatTime(sec: Int): String {
-        val m = sec / 60
-        val s = sec % 60
-        return String.format("%d:%02d", m, s)
     }
 
     private fun autoSyncTimer(weight: Float) {
@@ -858,69 +617,11 @@ class MainActivity : AppCompatActivity() {
         if (timerRunning) {
             if (weight <= stopThreshold) {
                 if (belowThresholdSinceMs == 0L) belowThresholdSinceMs = now
-                if (now - belowThresholdSinceMs > 1500) {
-                    stopTimer()
-                }
+                if (now - belowThresholdSinceMs > 1500) stopTimer()
             } else {
                 belowThresholdSinceMs = 0L
             }
         }
-    }
-
-    private fun updateStageProgress(weight: Float) {
-        if (!recipeModeEnabled || recipes.isEmpty()) return
-        val stages = recipes[currentRecipeIndex].stages
-        if (currentStageIndex > stages.lastIndex) return
-        val stage = stages[currentStageIndex]
-        val weightFrac = if (stage.targetWeight > 0f) {
-            (weight / stage.targetWeight).coerceIn(0f, 1f)
-        } else 0f
-        val progress = (weightFrac * 100f).toInt().coerceIn(0, 100)
-        stageRow1Bar.progress = progress
-        stageRow1Value.text = "${weight.toInt()}/${stage.targetWeight.toInt()} g"
-    }
-
-    private fun setupRecipeSpinner() {
-        recipeAdapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, recipes.map { it.title }.toMutableList())
-        recipeSpinner.adapter = recipeAdapter
-        recipeSpinner.setSelection(currentRecipeIndex)
-        recipeSpinner.setOnItemSelectedListener(object : android.widget.AdapterView.OnItemSelectedListener {
-            override fun onItemSelected(
-                parent: android.widget.AdapterView<*>?,
-                view: android.view.View?,
-                position: Int,
-                id: Long
-            ) {
-                if (position != currentRecipeIndex) {
-                    currentRecipeIndex = position
-                    resetRecipe(true)
-                }
-            }
-
-            override fun onNothingSelected(parent: android.widget.AdapterView<*>?) {}
-        })
-    }
-
-    private fun refreshRecipeSpinner() {
-        val titles = recipes.map { it.title }
-        recipeAdapter.clear()
-        recipeAdapter.addAll(titles)
-        recipeAdapter.notifyDataSetChanged()
-        if (recipes.isEmpty()) {
-            currentRecipeIndex = 0
-            return
-        }
-        currentRecipeIndex = currentRecipeIndex.coerceIn(0, recipes.lastIndex)
-        recipeSpinner.setSelection(currentRecipeIndex)
-    }
-
-    private fun toggleRecipeMode() {
-        recipeModeEnabled = !recipeModeEnabled
-        recipePanel.visibility = if (recipeModeEnabled) android.view.View.VISIBLE else android.view.View.GONE
-        if (!recipeModeEnabled) {
-            resetRecipe(false)
-        }
-        updateUi(statusText.text.toString())
     }
 
     private fun updateFlow(weight: Float) {
@@ -929,7 +630,7 @@ class MainActivity : AppCompatActivity() {
             lastWeightTime = now
             lastWeight = weight
             flowRate = 0f
-            flowText.text = "FLOW: 0.0 g/s"
+            viewModel.flowRate.value = 0f
             return
         }
         val dt = (now - lastWeightTime).coerceAtLeast(50L)
@@ -937,91 +638,23 @@ class MainActivity : AppCompatActivity() {
         val inst = (dw / dt) * 1000f
         flowRate = (flowRate * 0.7f) + (inst * 0.3f)
         if (flowRate < 0f) flowRate = 0f
-        flowText.text = "FLOW: " + String.format("%.1f g/s", flowRate)
+        viewModel.flowRate.value = flowRate
         lastWeightTime = now
         lastWeight = weight
     }
 
-    private fun toggleGraph() {
-        graphVisible = !graphVisible
-        weightChart.visibility = if (graphVisible) android.view.View.VISIBLE else android.view.View.GONE
-    }
-
-    private fun setupChart() {
-        val dataSet = LineDataSet(mutableListOf(), "Weight (g)")
-        dataSet.setDrawValues(false)
-        dataSet.setDrawCircles(false)
-        dataSet.lineWidth = 2f
-        dataSet.color = 0xFF18D1AE.toInt()
-        lineDataSet = dataSet
-        weightChart.data = LineData(dataSet)
-        weightChart.description.isEnabled = false
-        weightChart.legend.isEnabled = false
-        weightChart.axisRight.isEnabled = false
-        weightChart.axisLeft.axisMinimum = -5f
-        weightChart.axisLeft.textColor = 0xFFD6D6D6.toInt()
-        weightChart.axisLeft.gridColor = 0x44FFFFFF
-        weightChart.xAxis.position = XAxis.XAxisPosition.BOTTOM
-        weightChart.xAxis.granularity = 1f
-        weightChart.xAxis.textColor = 0xFFD6D6D6.toInt()
-        weightChart.xAxis.gridColor = 0x33FFFFFF
-        weightChart.xAxis.valueFormatter = object : ValueFormatter() {
-            override fun getFormattedValue(value: Float): String {
-                val total = value.toInt().coerceAtLeast(0)
-                val min = total / 60
-                val sec = total % 60
-                return String.format("%d:%02d", min, sec)
-            }
-        }
-        weightChart.xAxis.axisMinimum = 0f
-        weightChart.xAxis.axisMaximum = chartMinWindowSec
-        weightChart.isDragEnabled = false
-        weightChart.setScaleEnabled(false)
-        weightChart.isAutoScaleMinMaxEnabled = false
-        chartStartMs = System.currentTimeMillis()
-        weightChart.invalidate()
-    }
-
     private fun addChartPoint(weight: Float) {
-        if (!graphVisible) return
         if (chartStartMs == 0L) chartStartMs = System.currentTimeMillis()
-        val data = weightChart.data ?: return
-        val set = lineDataSet ?: return
         val x = (System.currentTimeMillis() - chartStartMs) / 1000f
-        set.addEntry(Entry(x, weight))
-        weightChart.xAxis.axisMaximum = maxOf(chartMinWindowSec, x + 1f)
-        data.notifyDataChanged()
-        weightChart.notifyDataSetChanged()
-        weightChart.invalidate()
+        viewModel.pushChartPoint(x, weight)
     }
 
     private fun resetChart() {
-        sampleIndex = 0f
-        lineDataSet?.clear()
-        weightChart.data?.notifyDataChanged()
-        weightChart.notifyDataSetChanged()
+        viewModel.clearChart()
         chartStartMs = System.currentTimeMillis()
-        weightChart.invalidate()
-    }
-
-    private fun setStageRow(
-        container: android.view.View,
-        titleView: TextView,
-        nameView: TextView,
-        barView: ProgressBar,
-        valueView: TextView,
-        stage: Stage?,
-        active: Boolean
-    ) {
-        if (stage == null) {
-            container.visibility = android.view.View.GONE
-            return
-        }
-        container.visibility = android.view.View.VISIBLE
-        val label = if (active) "● " else "○ "
-        titleView.text = "[STAGE] ${stage.name} (${formatTime(stage.startSec)}–${formatTime(stage.endSec)})  Target: ${stage.targetWeight.toInt()} g"
-        nameView.text = label + stage.name
-        if (!active) barView.progress = 0
-        valueView.text = "0/${stage.targetWeight.toInt()} g"
+        lastWeightTime = 0L
+        lastWeight = 0f
+        flowRate = 0f
+        viewModel.flowRate.value = 0f
     }
 }

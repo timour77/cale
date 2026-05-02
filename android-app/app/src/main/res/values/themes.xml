@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.ScaleApp" parent="Theme.AppCompat.DayNight.NoActionBar">
+        <item name="android:statusBarColor">#0A1410</item>
+        <item name="android:navigationBarColor">#0A1410</item>
+        <item name="android:windowLightStatusBar">false</item>
+    </style>
+</resources>
