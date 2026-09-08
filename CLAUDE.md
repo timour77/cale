@@ -95,10 +95,10 @@ cd android-app
 
 ```bash
 # Compile (does not flash)
-arduino-cli compile --fqbn Seeeduino:nrf52:xiaonRF52840 scales_bt
+arduino-cli compile --fqbn Seeeduino:nrf52:xiaonRF52840Plus scales_bt
 
 # Compile and flash to a connected board
-arduino-cli upload --fqbn Seeeduino:nrf52:xiaonRF52840 -p /dev/cu.usbmodem* scales_bt
+arduino-cli upload --fqbn Seeeduino:nrf52:xiaonRF52840 -p /dev/cu.usbmodem101 scales_bt
 ```
 
 Requires the `Seeeduino:nrf52` core plus the `U8g2` and
@@ -178,5 +178,5 @@ During brewing, the app tracks current stage index and updates progress bars and
 - **SharedPreferences:** Recipe persistence uses default SharedPreferences; consider migration if adding a database layer
 - **Emulator BLE:** Android Emulator has limited BLE support; use real device for reliable testing
 - **Gradle Version:** Project uses Gradle 8.2.2 with Kotlin 1.9.22; ensure gradle wrapper is up-to-date
-- **Arduino Board:** Firmware targets the Seeed XIAO nRF52840 (`Seeeduino:nrf52:xiaonRF52840`); different pins required for other boards
+- **Arduino Board:** Firmware targets the Seeed XIAO nRF52840 Plus (`Seeeduino:nrf52:xiaonRF52840Plus`); different pins required for other boards
 - **NAU7802 I2C:** Scale operates at I2C address 0x2A on default Qwiic connector; verify wiring if not detecting scale on boot
