@@ -15,6 +15,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
+import com.example.scale.brew.ChartPoint
 import com.example.scale.ui.theme.ScaleColors
 import com.github.mikephil.charting.charts.LineChart
 import com.github.mikephil.charting.components.XAxis
@@ -25,7 +26,7 @@ import com.github.mikephil.charting.formatter.ValueFormatter
 
 @Composable
 fun FlowChart(
-    points: List<Pair<Float, Float>>,
+    points: List<ChartPoint>,
     accent: Color,
 ) {
     Column(modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp)) {
@@ -80,7 +81,7 @@ fun FlowChart(
             },
             update = { chart ->
                 val accentArgb = accent.toArgb()
-                val entries = points.map { Entry(it.first, it.second) }
+                val entries = points.map { Entry(it.seconds, it.grams) }
                 val dataSet = LineDataSet(entries, "Weight (g)").apply {
                     setDrawValues(false)
                     setDrawCircles(false)

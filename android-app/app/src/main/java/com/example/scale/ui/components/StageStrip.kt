@@ -20,18 +20,16 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.example.scale.ui.model.Stage
+import com.example.scale.brew.StageProgress
 import com.example.scale.ui.theme.ScaleColors
 
 @Composable
 fun StageStrip(
-    stages: List<Stage>,
-    currentStageIndex: Int,
-    weight: Float,
+    progress: List<StageProgress>,
     units: String,
     accent: Color,
 ) {
-    if (stages.isEmpty()) return
+    if (progress.isEmpty()) return
 
     Column(
         modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp),
@@ -51,16 +49,11 @@ fun StageStrip(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(6.dp),
         ) {
-            stages.forEachIndexed { i, stage ->
-                val isActive = i == currentStageIndex
-                val isPast = i < currentStageIndex
-                val prevTarget = if (i > 0) stages[i - 1].targetWeight else 0f
-                val span = (stage.targetWeight - prevTarget).coerceAtLeast(0.001f)
-                val fill = when {
-                    isPast -> 1f
-                    isActive -> ((weight - prevTarget) / span).coerceIn(0f, 1f)
-                    else -> 0f
-                }
+            progress.forEach { entry ->
+                val stage = entry.stage
+                val isActive = entry.isActive
+                val isPast = entry.isPast
+                val fill = entry.fill
 
                 Column(modifier = Modifier.weight(1f)) {
                     Box(

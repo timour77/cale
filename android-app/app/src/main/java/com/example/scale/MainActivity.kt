@@ -28,6 +28,7 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.ViewModelProvider
+import com.example.scale.brew.BrewInput
 import com.example.scale.scale.ScaleCommand
 import com.example.scale.scale.ScaleEvent
 import com.example.scale.scale.ScaleProtocol
@@ -60,29 +61,7 @@ class MainActivity : AppCompatActivity() {
     private val pendingSubscriptions = ArrayDeque<BluetoothGattCharacteristic>()
 
     private val scanTimeoutMs = 10_000L
-    private var timerRunning = false
-    private var timerStartMs = 0L
-    private var belowThresholdSinceMs = 0L
-    private val startThreshold = 0.5f
-    private val stopThreshold = 0.2f
-    private var lastWeight = 0f
-    private var lastWeightTime = 0L
-    private var flowRate = 0f
-    private var chartStartMs = 0L
-    private var currentStageIndex = 0
 
-    private val timerTick = object : Runnable {
-        override fun run() {
-            if (timerRunning) {
-                val elapsedSec = (System.currentTimeMillis() - timerStartMs) / 1000f
-                viewModel.elapsedSeconds.value = elapsedSec
-                if (viewModel.recipeModeEnabled.value && viewModel.autoStageMode.value) {
-                    updateStageByTime(elapsedSec.toInt())
-                }
-                handler.postDelayed(this, 250)
-            }
-        }
-    }
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
@@ -112,8 +91,8 @@ class MainActivity : AppCompatActivity() {
         viewModel.onConnectToggle = {
             if (gatt != null) disconnect() else ensurePermissionsAndScan()
         }
+        viewModel.onSendCommands = { commands -> commands.forEach(::send) }
         viewModel.onTare = { send(ScaleCommand.Tare) }
-        viewModel.onToggleTimer = { toggleTimer() }
         viewModel.onCalZero = {
             send(ScaleCommand.CalZero)
             showToast("CAL:ZERO sent")
@@ -127,7 +106,7 @@ class MainActivity : AppCompatActivity() {
             val list = viewModel.recipes.value
             if (list != null && idx in list.indices) {
                 viewModel.currentRecipeIndex.value = idx
-                resetRecipe(stopTimerToo = true)
+                loadStagesIntoBrew()
             }
         }
         viewModel.onSaveRecipe = { idx, recipe ->
@@ -140,7 +119,7 @@ class MainActivity : AppCompatActivity() {
             }
             viewModel.recipes.value = current
             saveRecipesToPrefs()
-            resetRecipe(stopTimerToo = true)
+            loadStagesIntoBrew()
         }
         viewModel.onDeleteRecipe = { idx ->
             val current = viewModel.recipes.value.orEmpty().toMutableList()
@@ -150,11 +129,16 @@ class MainActivity : AppCompatActivity() {
                 viewModel.currentRecipeIndex.value =
                     (viewModel.currentRecipeIndex.value ?: 0).coerceAtMost(current.lastIndex.coerceAtLeast(0))
                 saveRecipesToPrefs()
-                resetRecipe(stopTimerToo = true)
+                loadStagesIntoBrew()
             }
         }
-        viewModel.onAdvanceStage = { advanceStageManual() }
-        viewModel.onResetRecipe = { resetRecipe(stopTimerToo = true) }
+    }
+
+    /** Push the selected recipe's stages into the brew, which resets stage progress. */
+    private fun loadStagesIntoBrew() {
+        val recipes = viewModel.recipes.value.orEmpty()
+        val index = viewModel.currentRecipeIndex.value ?: 0
+        viewModel.dispatch(BrewInput.SelectStages(recipes.getOrNull(index)?.stages.orEmpty()))
     }
 
     private fun ensurePermissionsAndScan() {
@@ -198,7 +182,7 @@ class MainActivity : AppCompatActivity() {
             return
         }
         updateStatus("Scanning…")
-        viewModel.weight.value = 0f
+        viewModel.dispatch(BrewInput.Disconnected)
         viewModel.battery.value = null
 
         val filter = ScanFilter.Builder()
@@ -275,7 +259,6 @@ class MainActivity : AppCompatActivity() {
             runOnUiThread {
                 setConnected(true)
                 updateStatus("Scale 02")
-                resetChart()
             }
         }
 
@@ -351,23 +334,11 @@ class MainActivity : AppCompatActivity() {
 
     private fun onScaleEvent(event: ScaleEvent) {
         when (event) {
-            is ScaleEvent.Weight -> onWeightSample(event.grams)
+            is ScaleEvent.Weight ->
+                viewModel.dispatch(BrewInput.Sample(event.grams, System.currentTimeMillis()))
             is ScaleEvent.Battery -> viewModel.battery.value = event.percent
             is ScaleEvent.Calibration ->
                 showToast("Zero ${event.zero}, factor ${event.factor}")
-        }
-    }
-
-    private fun onWeightSample(weight: Float) {
-        viewModel.weight.value = weight
-        updateFlow(weight)
-        addChartPoint(weight)
-        autoSyncTimer(weight)
-        if (viewModel.recipeModeEnabled.value) {
-            if (viewModel.autoStageMode.value && timerRunning) {
-                val elapsed = ((System.currentTimeMillis() - timerStartMs) / 1000).toInt()
-                updateStageByTime(elapsed)
-            }
         }
     }
 
@@ -388,9 +359,7 @@ class MainActivity : AppCompatActivity() {
         ctrlChar = null
         battChar = null
         pendingSubscriptions.clear()
-        stopTimer()
-        resetRecipe(false)
-        resetChart()
+        viewModel.dispatch(BrewInput.Disconnected)
         viewModel.battery.value = null
         setConnected(false)
         updateStatus("Disconnected")
@@ -429,28 +398,6 @@ class MainActivity : AppCompatActivity() {
         val connectedGatt = gatt ?: return
         val characteristic = battChar ?: return
         connectedGatt.readCharacteristic(characteristic)
-    }
-
-    private fun toggleTimer() {
-        if (!timerRunning) startTimer() else stopTimer()
-    }
-
-    private fun stopTimer() {
-        timerRunning = false
-        viewModel.timerRunning.value = false
-        handler.removeCallbacks(timerTick)
-        send(ScaleCommand.Timer(running = false))
-        belowThresholdSinceMs = 0L
-    }
-
-    private fun startTimer() {
-        timerRunning = true
-        viewModel.timerRunning.value = true
-        timerStartMs = System.currentTimeMillis()
-        viewModel.elapsedSeconds.value = 0f
-        handler.removeCallbacks(timerTick)
-        handler.post(timerTick)
-        send(ScaleCommand.Timer(running = true))
     }
 
     private fun showToast(message: String) {
@@ -563,101 +510,4 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun updateStageByTime(elapsedSec: Int) {
-        val recipes = viewModel.recipes.value.orEmpty()
-        if (recipes.isEmpty()) return
-        val idx = viewModel.currentRecipeIndex.value ?: 0
-        val stages = recipes.getOrNull(idx)?.stages ?: return
-        if (stages.isEmpty()) return
-        val first = stages.indexOfFirst { elapsedSec < it.endSec }
-        val newIndex = if (first == -1) stages.lastIndex + 1 else first
-        if (newIndex != currentStageIndex) {
-            currentStageIndex = newIndex
-            viewModel.stageIndex.value = newIndex
-            broadcastStageCommand()
-        }
-    }
-
-    private fun advanceStageManual() {
-        if (!viewModel.recipeModeEnabled.value) return
-        val recipes = viewModel.recipes.value.orEmpty()
-        if (recipes.isEmpty()) return
-        if (!timerRunning) startTimer()
-        val stages = recipes.getOrNull(viewModel.currentRecipeIndex.value ?: 0)?.stages ?: return
-        if (stages.isEmpty()) return
-        if (currentStageIndex <= stages.lastIndex) {
-            currentStageIndex += 1
-            viewModel.stageIndex.value = currentStageIndex
-            broadcastStageCommand()
-        }
-    }
-
-    private fun broadcastStageCommand() {
-        val recipes = viewModel.recipes.value.orEmpty()
-        val recipe = recipes.getOrNull(viewModel.currentRecipeIndex.value ?: 0) ?: return
-        val stage = recipe.stages.getOrNull(currentStageIndex)
-        if (stage != null) {
-            send(ScaleCommand.SetStage(stage.name, stage.targetWeight.toInt()))
-        } else {
-            send(ScaleCommand.ClearStage)
-        }
-    }
-
-    private fun resetRecipe(stopTimerToo: Boolean) {
-        if (stopTimerToo && timerRunning) stopTimer()
-        currentStageIndex = 0
-        viewModel.stageIndex.value = 0
-        send(ScaleCommand.ClearStage)
-    }
-
-    private fun autoSyncTimer(weight: Float) {
-        val now = System.currentTimeMillis()
-        if (!timerRunning && weight >= startThreshold) {
-            startTimer()
-            return
-        }
-
-        if (timerRunning) {
-            if (weight <= stopThreshold) {
-                if (belowThresholdSinceMs == 0L) belowThresholdSinceMs = now
-                if (now - belowThresholdSinceMs > 1500) stopTimer()
-            } else {
-                belowThresholdSinceMs = 0L
-            }
-        }
-    }
-
-    private fun updateFlow(weight: Float) {
-        val now = System.currentTimeMillis()
-        if (lastWeightTime == 0L) {
-            lastWeightTime = now
-            lastWeight = weight
-            flowRate = 0f
-            viewModel.flowRate.value = 0f
-            return
-        }
-        val dt = (now - lastWeightTime).coerceAtLeast(50L)
-        val dw = weight - lastWeight
-        val inst = (dw / dt) * 1000f
-        flowRate = (flowRate * 0.7f) + (inst * 0.3f)
-        if (flowRate < 0f) flowRate = 0f
-        viewModel.flowRate.value = flowRate
-        lastWeightTime = now
-        lastWeight = weight
-    }
-
-    private fun addChartPoint(weight: Float) {
-        if (chartStartMs == 0L) chartStartMs = System.currentTimeMillis()
-        val x = (System.currentTimeMillis() - chartStartMs) / 1000f
-        viewModel.pushChartPoint(x, weight)
-    }
-
-    private fun resetChart() {
-        viewModel.clearChart()
-        chartStartMs = System.currentTimeMillis()
-        lastWeightTime = 0L
-        lastWeight = 0f
-        flowRate = 0f
-        viewModel.flowRate.value = 0f
-    }
 }

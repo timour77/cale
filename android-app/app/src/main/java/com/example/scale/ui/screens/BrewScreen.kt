@@ -28,24 +28,18 @@ import com.example.scale.ui.viewmodel.BrewViewModel
 
 @Composable
 fun BrewScreen(viewModel: BrewViewModel) {
-    val weight by viewModel.weight.observeAsState(0f)
-    val elapsed by viewModel.elapsedSeconds.observeAsState(0f)
-    val flow by viewModel.flowRate.observeAsState(0f)
-    val stageIdx by viewModel.stageIndex.observeAsState(0)
     val connected by viewModel.connected.observeAsState(false)
     val statusText by viewModel.connectionStatus.observeAsState("Disconnected")
     val battery by viewModel.battery.observeAsState(null)
-    val timerRunning by viewModel.timerRunning.observeAsState(false)
     val recipes by viewModel.recipes.observeAsState(emptyList())
     val recipeIndex by viewModel.currentRecipeIndex.observeAsState(0)
 
+    val brew = viewModel.brew.value
     val accent = viewModel.accentColor.value
     val units = viewModel.units.value
-    val recipeMode = viewModel.recipeModeEnabled.value
-    val autoStage = viewModel.autoStageMode.value
+    val recipeMode = brew.recipeMode
 
     val currentRecipe = recipes.getOrNull(recipeIndex)
-    val activeStage = currentRecipe?.stages?.getOrNull(stageIdx)
 
     Surface(
         modifier = Modifier.fillMaxSize(),
@@ -80,15 +74,15 @@ fun BrewScreen(viewModel: BrewViewModel) {
                 )
 
                 HeroWeight(
-                    weight = weight,
+                    weight = brew.weightGrams,
                     units = units,
                     accent = accent,
                 )
 
                 MetaStrip(
-                    elapsedSeconds = elapsed,
-                    flow = flow,
-                    stageName = if (recipeMode) activeStage?.name else null,
+                    elapsedSeconds = brew.elapsedSeconds,
+                    flow = brew.flowRate,
+                    stageName = if (recipeMode) brew.activeStage?.name else null,
                     units = units,
                     accent = accent,
                     secondary = ScaleColors.ACCENT_SECONDARY,
@@ -96,16 +90,14 @@ fun BrewScreen(viewModel: BrewViewModel) {
 
                 if (viewModel.showChart.value) {
                     FlowChart(
-                        points = viewModel.chartPoints.toList(),
+                        points = brew.chart,
                         accent = accent,
                     )
                 }
 
-                if (viewModel.showStages.value && recipeMode && currentRecipe != null) {
+                if (viewModel.showStages.value && recipeMode) {
                     StageStrip(
-                        stages = currentRecipe.stages,
-                        currentStageIndex = stageIdx,
-                        weight = weight,
+                        progress = brew.stageProgress,
                         units = units,
                         accent = accent,
                     )
@@ -113,10 +105,10 @@ fun BrewScreen(viewModel: BrewViewModel) {
 
                 ControlBar(
                     enabled = connected,
-                    timerRunning = timerRunning,
+                    timerRunning = brew.timerRunning,
                     accent = accent,
                     onTare = { viewModel.tareNow() },
-                    onStartStop = { viewModel.onToggleTimer() },
+                    onStartStop = { viewModel.toggleTimer() },
                     onRecipes = { viewModel.openRecipePicker() },
                 )
             }
@@ -129,15 +121,15 @@ fun BrewScreen(viewModel: BrewViewModel) {
             currentIndex = recipeIndex,
             accent = accent,
             recipeModeEnabled = recipeMode,
-            autoStage = autoStage,
+            autoStage = brew.autoStage,
             canControl = connected,
             onSelect = { viewModel.onSelectRecipe(it) },
             onAddNew = { viewModel.startNewRecipe() },
             onEditCurrent = { viewModel.editCurrentRecipe() },
             onToggleRecipeMode = { viewModel.toggleRecipeMode() },
-            onToggleAutoStage = { viewModel.autoStageMode.value = !viewModel.autoStageMode.value },
-            onAdvanceStage = { viewModel.onAdvanceStage() },
-            onResetRecipe = { viewModel.onResetRecipe() },
+            onToggleAutoStage = { viewModel.toggleAutoStage() },
+            onAdvanceStage = { viewModel.advanceStage() },
+            onResetRecipe = { viewModel.resetBrew() },
             onDismiss = { viewModel.closeRecipePicker() },
         )
     }

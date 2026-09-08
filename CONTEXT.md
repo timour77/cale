@@ -38,6 +38,12 @@ tests are the contract between the two.
 `targetWeight` in grams, and a note. Targets are cumulative, not per-stage: a Stage's own
 contribution is its target minus the previous Stage's.
 
-**Brew Session** — not yet a module. The rules that turn weight samples into a Brew: auto-start
-above 0.5 g, auto-stop after 1.5 s below 0.2 g, smoothed flow rate, and Stage advance. Currently
-scattered across `MainActivity` as private fields; extracting it is the next planned change.
+**Brew Session** — the rules that turn weight samples into a Brew: auto-start above 0.5 g,
+auto-stop after 1.5 s below 0.2 g, smoothed flow rate, Stage advance, and the chart trace. Lives in
+`android-app/.../brew/` as a pure reducer: `BrewSession.reduce(state, input)` returns a new
+`BrewState` and any `ScaleCommand`s the transition implies. It reads no clock and performs no side
+effects — time arrives as an `atMs` argument, and commands are returned rather than sent, so the
+whole ruleset is exercisable on the JVM.
+
+**BrewInput** — something that happens to a Brew Session: a weight `Sample`, a timer control, a
+Stage advance, a Recipe change, a disconnect.
