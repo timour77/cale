@@ -179,15 +179,31 @@ void saveCalibration() {
   }
 }
 
+/** True while the board is on USB bus power rather than the battery. */
+bool usbPowered() {
+  uint32_t status = 0;
+  if (sd_power_usbregstatus_get(&status) == NRF_SUCCESS) {
+    return (status & POWER_USBREGSTATUS_VBUSDETECT_Msk) != 0;
+  }
+  return (NRF_POWER->USBREGSTATUS & POWER_USBREGSTATUS_VBUSDETECT_Msk) != 0;
+}
+
 /**
- * Power the scale down properly: SYSTEM OFF, a couple of microamps, woken only by
- * the tare button pulling D0 low. It comes back as a cold start, which is fine --
- * the calibration lives in LittleFS and survives.
+ * Power the scale down properly: SYSTEM OFF, a couple of microamps, woken by the
+ * tare button. It comes back as a cold start, which is fine -- the calibration
+ * lives in LittleFS and survives.
+ *
+ * The wake polarity is read off the button rather than assumed. Whether the pin
+ * rests high and the button pulls it to ground or the other way round, DETECT is
+ * armed for the opposite of whatever the pin is doing right now, so pressing it
+ * always wakes the board. Guessing wrong here means a scale that only a reset can
+ * revive.
  */
 void enterDeepSleep() {
   u8g2.clearBuffer();
   u8g2.setFont(u8g2_font_ncenB08_tr);
   u8g2.drawStr(0, 20, "Sleeping...");
+  u8g2.drawStr(0, 40, "press TARE to wake");
   u8g2.sendBuffer();
   delay(600);
 
@@ -196,11 +212,13 @@ void enterDeepSleep() {
   u8g2.setPowerSave(1);
   delay(50);
 
-  // Latch the button pin as a wake source before the core stops clocking.
+  // Latch the button pin as a wake source before the core stops clocking, armed
+  // against whichever way it currently rests.
+  bool restsHigh = (digitalRead(TARE_BUTTON_PIN) == HIGH);
   nrf_gpio_cfg_sense_input(
       g_ADigitalPinMap[TARE_BUTTON_PIN],
-      NRF_GPIO_PIN_PULLUP,
-      NRF_GPIO_PIN_SENSE_LOW);
+      restsHigh ? NRF_GPIO_PIN_PULLUP : NRF_GPIO_PIN_PULLDOWN,
+      restsHigh ? NRF_GPIO_PIN_SENSE_LOW : NRF_GPIO_PIN_SENSE_HIGH);
 
   sd_power_system_off();
   // Only reached if the SoftDevice declined (e.g. it is not enabled yet).
@@ -405,9 +423,13 @@ void loop() {
   // Signed difference on purpose: if a timestamp ever ends up ahead of `now`,
   // this reads as negative rather than as four billion milliseconds. Powering the
   // scale off is not something to do on an arithmetic accident.
+  // Never power down while on USB. That is exactly when the board is being
+  // flashed or watched, it is the situation where a failed wake is most annoying,
+  // and there is no battery to save. On USB the timeout simply does not apply.
   if (timerRunning) {
     lastWeightActivityMs = now;
-  } else if ((int32_t)(now - lastWeightActivityMs) > (int32_t)AUTO_OFF_TIMEOUT_MS) {
+  } else if (!usbPowered()
+             && (int32_t)(now - lastWeightActivityMs) > (int32_t)AUTO_OFF_TIMEOUT_MS) {
     enterDeepSleep();
   }
 
