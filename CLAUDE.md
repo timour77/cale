@@ -16,8 +16,18 @@ The Android app communicates with the scale via **BLE (Bluetooth Low Energy)**, 
 ### Android App (`android-app/`)
 
 **Structure:**
-- `app/src/main/java/com/example/scale/MainActivity.kt` — Single activity app handling all UI logic and BLE communication
-- `app/src/main/res/layout/activity_main.xml` — UI layout: status displays, control buttons, recipe panel, weight chart
+The UI is Jetpack Compose; there are no XML layouts. Four packages, each with one job:
+
+- `scale/` — the device. `ScaleProtocol` (wire format), `ScaleLink` (the seam), and its two
+  adapters: `GattScaleLink` over the real radio, `FakeScaleLink` replaying a scripted pour.
+  The only package that knows Bluetooth exists.
+- `brew/` — the rules. `BrewSession.reduce(state, input)` is a pure function: no clock, no
+  Android, no side effects. Commands come back as data for the caller to send.
+- `recipe/` — storage. `RecipeStore` with `PrefsRecipeStore` and `InMemoryRecipeStore`.
+- `ui/` — Compose screen, components, and `BrewViewModel`, which owns a `ScaleLink` and a
+  `RecipeStore` and is the only thing that wires the other three together.
+
+`MainActivity` does permissions and `setContent`, and nothing else.
 - `app/build.gradle` — App module configuration (SDK level 34, Kotlin 1.9.22, Java 17)
 
 **Key Features:**
@@ -119,16 +129,18 @@ cd android-app
 
 ## Key Implementation Details
 
-### MainActivity Initialization
+### Startup
 
-The app uses a single `onCreate` which:
-1. Initializes all UI views from `activity_main.xml`
-2. Sets up BLE adapter and scanner with proper permission checks
-3. Registers connect button listener to start BLE scan
-4. Loads recipes from SharedPreferences
-5. Sets up recipe/graph toggle buttons to show/hide panels
+`MainActivity.onCreate` builds a `BrewViewModel` through its `Factory`, handing it a
+`GattScaleLink` and a `PrefsRecipeStore`, then calls `setContent`. The ViewModel loads recipes and
+subscribes to the link in its `init`; the connection and the brew both survive rotation.
+
+Permissions are the Activity's only other job, via an `ActivityResultContracts` launcher — the
+link assumes it already has them.
 
 ### BLE Connection Flow
+
+This all lives inside `GattScaleLink`; nothing above the seam sees any of it.
 
 1. **Scan:** `BluetoothLeScanner.startScan()` with callback
 2. **Connect:** On device found, call `device.connectGatt()`

@@ -28,6 +28,17 @@ it is spelled.
 firmware's `handleControlCommand` and `notify` calls are the second implementation of it. Its unit
 tests are the contract between the two.
 
+**ScaleLink** — the seam between the brew and the radio: `connect`/`disconnect`/`send`, plus a
+`StateFlow<LinkState>` and a `Flow<ScaleEvent>`. Two adapters satisfy it — `GattScaleLink` over
+the Android Bluetooth stack, and `FakeScaleLink` replaying a scripted pour for tests and Compose
+previews.
+
+**LinkState** — how the connection is doing: `Idle`, `Scanning`, `Connecting`, `Ready`, or
+`Failed(reason)`. Carries no display strings; the UI decides what these are called.
+
+**RecipeStore** — where Recipes are kept. A load never returns nothing: an empty or unreadable
+store yields `DefaultRecipes`, flagged so the UI can say so.
+
 ## Brew
 
 **Brew** — one pour, from the moment the timer starts to the moment it stops.
