@@ -111,6 +111,16 @@ void handleControlCommand(const uint8_t* data, uint16_t len) {
       currentStageName = stageInfo.substring(0, colonIdx);
       currentStageTarget = stageInfo.substring(colonIdx + 1).toFloat();
     }
+  } else if (cmd == "STAGE_CLEAR") {
+    currentStageName = "";
+    currentStageTarget = 0.0f;
+  } else if (cmd == "TIMER:START") {
+    // The app owns the brew timer; this only mirrors its state onto the display.
+    timerRunning = true;
+    timerStartMs = millis();
+    lastWeightActivityMs = millis();
+  } else if (cmd == "TIMER:STOP") {
+    timerRunning = false;
   }
 }
 
@@ -120,7 +130,7 @@ void onCtrlCharWrite(uint16_t conn_hdl, BLECharacteristic* chr, uint8_t* data, u
 
 void sendCalibrationValues() {
   String response = String(manualZero) + "," + String(calibrationFactor);
-  ctrlChar.write(response.c_str(), response.length());
+  ctrlChar.notify(response.c_str(), response.length());
 }
 
 void loadCalibration() {
@@ -159,7 +169,7 @@ void setupBLE() {
   weightChar.begin();
   weightChar.write32(0);
 
-  ctrlChar.setProperties(CHR_PROPS_WRITE);
+  ctrlChar.setProperties(CHR_PROPS_WRITE | CHR_PROPS_NOTIFY);
   ctrlChar.setPermission(SECMODE_OPEN, SECMODE_OPEN);
   ctrlChar.setMaxLen(50);
   ctrlChar.setWriteCallback(onCtrlCharWrite);
