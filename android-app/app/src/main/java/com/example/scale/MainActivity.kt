@@ -28,6 +28,9 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.ViewModelProvider
+import com.example.scale.scale.ScaleCommand
+import com.example.scale.scale.ScaleEvent
+import com.example.scale.scale.ScaleProtocol
 import com.example.scale.ui.model.Recipe
 import com.example.scale.ui.model.Stage
 import com.example.scale.ui.screens.BrewScreen
@@ -35,8 +38,6 @@ import com.example.scale.ui.theme.ScaleTheme
 import com.example.scale.ui.viewmodel.BrewViewModel
 import org.json.JSONArray
 import org.json.JSONObject
-import java.nio.charset.StandardCharsets
-import java.util.UUID
 
 class MainActivity : AppCompatActivity() {
 
@@ -52,11 +53,11 @@ class MainActivity : AppCompatActivity() {
 
     private val handler = Handler(Looper.getMainLooper())
 
-    private val serviceUuid = UUID.fromString("6e400001-b5a3-f393-e0a9-e50e24dcca9e")
-    private val weightCharUuid = UUID.fromString("6e400003-b5a3-f393-e0a9-e50e24dcca9e")
-    private val ctrlCharUuid = UUID.fromString("6e400002-b5a3-f393-e0a9-e50e24dcca9e")
-    private val battCharUuid = UUID.fromString("6e400004-b5a3-f393-e0a9-e50e24dcca9e")
-    private val cccdUuid = UUID.fromString("00002902-0000-1000-8000-00805f9b34fb")
+    /**
+     * Characteristics still waiting to have notifications enabled. Android permits one outstanding
+     * GATT operation at a time, so descriptor writes are drained one per [onDescriptorWrite].
+     */
+    private val pendingSubscriptions = ArrayDeque<BluetoothGattCharacteristic>()
 
     private val scanTimeoutMs = 10_000L
     private var timerRunning = false
@@ -82,13 +83,6 @@ class MainActivity : AppCompatActivity() {
             }
         }
     }
-    private val batteryPollTick = object : Runnable {
-        override fun run() {
-            readBatteryOnce()
-            handler.postDelayed(this, 15000)
-        }
-    }
-
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
@@ -118,20 +112,17 @@ class MainActivity : AppCompatActivity() {
         viewModel.onConnectToggle = {
             if (gatt != null) disconnect() else ensurePermissionsAndScan()
         }
-        viewModel.onTare = { sendCommand("TARE") }
+        viewModel.onTare = { send(ScaleCommand.Tare) }
         viewModel.onToggleTimer = { toggleTimer() }
         viewModel.onCalZero = {
-            sendCommand("CAL:ZERO")
+            send(ScaleCommand.CalZero)
             showToast("CAL:ZERO sent")
         }
         viewModel.onCalSpan = { grams ->
-            sendCommand("CAL:SPAN:$grams")
+            send(ScaleCommand.CalSpan(grams))
             showToast("CAL:SPAN sent")
         }
-        viewModel.onCalGet = {
-            sendCommand("CAL:GET")
-            showToast("CAL:GET sent")
-        }
+        viewModel.onCalGet = { send(ScaleCommand.CalGet) }
         viewModel.onSelectRecipe = { idx ->
             val list = viewModel.recipes.value
             if (list != null && idx in list.indices) {
@@ -211,7 +202,7 @@ class MainActivity : AppCompatActivity() {
         viewModel.battery.value = null
 
         val filter = ScanFilter.Builder()
-            .setServiceUuid(ParcelUuid(serviceUuid))
+            .setServiceUuid(ParcelUuid(ScaleProtocol.SERVICE_UUID))
             .build()
         val settings = ScanSettings.Builder()
             .setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY)
@@ -266,29 +257,21 @@ class MainActivity : AppCompatActivity() {
         }
 
         override fun onServicesDiscovered(gatt: BluetoothGatt, status: Int) {
-            val service: BluetoothGattService? = gatt.getService(serviceUuid)
-            weightChar = service?.getCharacteristic(weightCharUuid)
-            ctrlChar = service?.getCharacteristic(ctrlCharUuid)
-            battChar = service?.getCharacteristic(battCharUuid)
+            val service: BluetoothGattService? = gatt.getService(ScaleProtocol.SERVICE_UUID)
+            weightChar = service?.getCharacteristic(ScaleProtocol.WEIGHT_CHAR_UUID)
+            ctrlChar = service?.getCharacteristic(ScaleProtocol.CTRL_CHAR_UUID)
+            battChar = service?.getCharacteristic(ScaleProtocol.BATTERY_CHAR_UUID)
             if (weightChar == null || ctrlChar == null) {
                 runOnUiThread { updateStatus("Characteristic not found") }
                 return
             }
 
-            gatt.setCharacteristicNotification(weightChar, true)
-            val cccd = weightChar?.getDescriptor(cccdUuid)
-            if (cccd != null) {
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                    gatt.writeDescriptor(cccd, BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE)
-                } else {
-                    @Suppress("DEPRECATION")
-                    cccd.value = BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE
-                    @Suppress("DEPRECATION")
-                    gatt.writeDescriptor(cccd)
-                }
-            } else {
-                runOnUiThread { updateStatus("Notify descriptor missing") }
-            }
+            // Weight and battery push samples; the control characteristic notifies calibration
+            // replies back. Queue them: only one descriptor write may be in flight at a time.
+            pendingSubscriptions.clear()
+            listOfNotNull(weightChar, battChar, ctrlChar).forEach { pendingSubscriptions.addLast(it) }
+            subscribeNext(gatt)
+
             runOnUiThread {
                 setConnected(true)
                 updateStatus("Scale 02")
@@ -301,10 +284,12 @@ class MainActivity : AppCompatActivity() {
             descriptor: BluetoothGattDescriptor,
             status: Int,
         ) {
-            runOnUiThread {
-                handler.removeCallbacks(batteryPollTick)
+            if (pendingSubscriptions.isNotEmpty()) {
+                subscribeNext(gatt)
+            } else {
+                // Everything is subscribed; the firmware only notifies battery every 30s, so read
+                // it once to avoid an empty indicator until the first push arrives.
                 readBatteryOnce()
-                handler.postDelayed(batteryPollTick, 15000)
             }
         }
 
@@ -333,12 +318,8 @@ class MainActivity : AppCompatActivity() {
             raw: ByteArray,
             status: Int,
         ) {
-            if (status == BluetoothGatt.GATT_SUCCESS && characteristic.uuid == battCharUuid) {
-                val pct = String(raw, StandardCharsets.US_ASCII).trim().toIntOrNull()
-                runOnUiThread {
-                    if (pct != null) viewModel.battery.value = pct.coerceIn(0, 100)
-                }
-            }
+            if (status != BluetoothGatt.GATT_SUCCESS) return
+            handleCharacteristicChanged(characteristic, raw)
         }
 
         @Suppress("DEPRECATION")
@@ -363,16 +344,17 @@ class MainActivity : AppCompatActivity() {
             characteristic: BluetoothGattCharacteristic,
             raw: ByteArray,
         ) {
-            if (characteristic.uuid == battCharUuid) {
-                val pct = String(raw, StandardCharsets.US_ASCII).trim().toIntOrNull()
-                runOnUiThread {
-                    if (pct != null) viewModel.battery.value = pct.coerceIn(0, 100)
-                }
-            } else if (characteristic.uuid == weightCharUuid) {
-                val text = String(raw, StandardCharsets.US_ASCII).trim()
-                val parsed = text.replace(',', '.').toFloatOrNull() ?: return
-                runOnUiThread { onWeightSample(parsed) }
-            }
+            val event = ScaleProtocol.decode(characteristic.uuid, raw) ?: return
+            runOnUiThread { onScaleEvent(event) }
+        }
+    }
+
+    private fun onScaleEvent(event: ScaleEvent) {
+        when (event) {
+            is ScaleEvent.Weight -> onWeightSample(event.grams)
+            is ScaleEvent.Battery -> viewModel.battery.value = event.percent
+            is ScaleEvent.Calibration ->
+                showToast("Zero ${event.zero}, factor ${event.factor}")
         }
     }
 
@@ -405,7 +387,7 @@ class MainActivity : AppCompatActivity() {
         weightChar = null
         ctrlChar = null
         battChar = null
-        handler.removeCallbacks(batteryPollTick)
+        pendingSubscriptions.clear()
         stopTimer()
         resetRecipe(false)
         resetChart()
@@ -415,10 +397,31 @@ class MainActivity : AppCompatActivity() {
     }
 
     @android.annotation.SuppressLint("MissingPermission")
-    private fun sendCommand(cmd: String) {
+    @Suppress("DEPRECATION")
+    private fun send(command: ScaleCommand) {
         val characteristic = ctrlChar ?: return
-        characteristic.value = cmd.toByteArray(StandardCharsets.US_ASCII)
+        characteristic.value = ScaleProtocol.encode(command)
         gatt?.writeCharacteristic(characteristic)
+    }
+
+    @android.annotation.SuppressLint("MissingPermission")
+    @Suppress("DEPRECATION")
+    private fun subscribeNext(gatt: BluetoothGatt) {
+        val characteristic = pendingSubscriptions.removeFirstOrNull() ?: return
+        gatt.setCharacteristicNotification(characteristic, true)
+        val cccd = characteristic.getDescriptor(ScaleProtocol.CCCD_UUID)
+        if (cccd == null) {
+            // No descriptor means no notifications from this one; move on rather than stalling
+            // the rest of the queue.
+            subscribeNext(gatt)
+            return
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            gatt.writeDescriptor(cccd, BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE)
+        } else {
+            cccd.value = BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE
+            gatt.writeDescriptor(cccd)
+        }
     }
 
     @android.annotation.SuppressLint("MissingPermission")
@@ -436,7 +439,7 @@ class MainActivity : AppCompatActivity() {
         timerRunning = false
         viewModel.timerRunning.value = false
         handler.removeCallbacks(timerTick)
-        sendCommand("TIMER:STOP")
+        send(ScaleCommand.Timer(running = false))
         belowThresholdSinceMs = 0L
     }
 
@@ -447,7 +450,7 @@ class MainActivity : AppCompatActivity() {
         viewModel.elapsedSeconds.value = 0f
         handler.removeCallbacks(timerTick)
         handler.post(timerTick)
-        sendCommand("TIMER:START")
+        send(ScaleCommand.Timer(running = true))
     }
 
     private fun showToast(message: String) {
@@ -594,9 +597,9 @@ class MainActivity : AppCompatActivity() {
         val recipe = recipes.getOrNull(viewModel.currentRecipeIndex.value ?: 0) ?: return
         val stage = recipe.stages.getOrNull(currentStageIndex)
         if (stage != null) {
-            sendCommand("STAGE:${stage.name}|${stage.targetWeight.toInt()}")
+            send(ScaleCommand.SetStage(stage.name, stage.targetWeight.toInt()))
         } else {
-            sendCommand("STAGE:|0")
+            send(ScaleCommand.ClearStage)
         }
     }
 
@@ -604,7 +607,7 @@ class MainActivity : AppCompatActivity() {
         if (stopTimerToo && timerRunning) stopTimer()
         currentStageIndex = 0
         viewModel.stageIndex.value = 0
-        sendCommand("STAGE:|0")
+        send(ScaleCommand.ClearStage)
     }
 
     private fun autoSyncTimer(weight: Float) {

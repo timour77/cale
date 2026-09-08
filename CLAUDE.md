@@ -31,10 +31,17 @@ The Android app communicates with the scale via **BLE (Bluetooth Low Energy)**, 
 - **Permissions:** Requires Bluetooth and location permissions (Android 6.0+)
 
 **BLE Protocol:**
-- Custom service UUID: `9ecadc24-0ee5-a9e0-93f3-a3b501006e` (16 bytes)
-- **Weight characteristic** (0x03): Float weight in grams (readable, notify)
-- **Control characteristic** (0x02): Command strings (writable) — `TARE`, `CAL:ZERO`, `CAL:SPAN:1000.0`, etc.
-- **Battery characteristic** (0x04): Percentage as integer (readable, notify)
+
+`app/src/main/java/com/example/scale/scale/ScaleProtocol.kt` is the specification — read it rather
+than a restatement here, which is how the two sides drifted apart in the first place. The firmware's
+`handleControlCommand` is the second implementation of the same spec, and
+`ScaleProtocolTest` is the contract between them: **change a byte in one, change it in both, in the
+same commit.**
+
+In outline: Nordic UART UUIDs (`6e40000X-b5a3-f393-e0a9-e50e24dcca9e`) carrying **ASCII text**, not
+binary. Weight (0x03) and battery (0x04) notify; control (0x02) takes command writes and notifies
+calibration replies back. Commands are values of `ScaleCommand`, events are values of `ScaleEvent`,
+and nothing outside `ScaleProtocol` should build or parse a frame.
 
 ### Arduino Firmware
 
@@ -46,7 +53,7 @@ The Android app communicates with the scale via **BLE (Bluetooth Low Energy)**, 
 **Key Components:**
 - **NAU7802 Driver:** ADC-based weight sensor with gain-of-128 load cell interface
 - **Calibration:** Manual zero/span calibration stored in flash (`/scale_cal.bin`)
-- **Filtering:** IIR low-pass filter (alpha=0.10) with jump detection (2.0g threshold) and zero-tracking
+- **Filtering:** IIR low-pass filter (alpha=0.30) with jump detection (2.0g threshold) and zero-tracking
 - **BLE Notifications:** Sends weight and battery updates at ~10 SPS (samples per second)
 - **Control Handler:** Parses incoming commands (TARE, CAL:ZERO, CAL:SPAN, STAGE_SET, etc.)
 - **Auto-off:** 10-minute inactivity timeout
@@ -84,6 +91,19 @@ cd android-app
 ./gradlew test --tests com.example.scale.SomeTestClass
 ```
 
+### Building the Firmware
+
+```bash
+# Compile (does not flash)
+arduino-cli compile --fqbn Seeeduino:nrf52:xiaonRF52840 scales_bt
+
+# Compile and flash to a connected board
+arduino-cli upload --fqbn Seeeduino:nrf52:xiaonRF52840 -p /dev/cu.usbmodem* scales_bt
+```
+
+Requires the `Seeeduino:nrf52` core plus the `U8g2` and
+`SparkFun Qwiic Scale NAU7802 Arduino Library` libraries.
+
 ### Cleaning Build Artifacts
 
 ```bash
@@ -113,18 +133,19 @@ The app uses a single `onCreate` which:
 1. **Scan:** `BluetoothLeScanner.startScan()` with callback
 2. **Connect:** On device found, call `device.connectGatt()`
 3. **Discover:** `BluetoothGattCallback.onServicesDiscovered()` finds weight/control/battery characteristics
-4. **Subscribe:** `setNotificationEnabled()` on weight and battery for auto-updates
+4. **Subscribe:** enable notifications on weight, battery, and control (for calibration replies). Android allows one outstanding GATT operation, so descriptor writes are queued and drained one per `onDescriptorWrite`
 5. **Communicate:** `characteristic.setValue()` + `writeCharacteristic()` for commands; notifications trigger UI updates
 
 ### Recipe System
 
-Recipes are stored as JSON in SharedPreferences under key `"recipes"`. Each recipe is a JSON object:
+Recipes are stored as JSON in SharedPreferences under key `"recipes_json"`. Each recipe is a JSON
+object. Stage targets are **cumulative**, not per-stage:
 ```json
 {
-  "name": "V60",
+  "title": "V60",
   "stages": [
-    {"name": "Bloom", "target": 50.0, "type": "weight"},
-    {"name": "Pour 1", "target": 150.0, "type": "weight"}
+    {"name": "Bloom", "startSec": 0, "endSec": 40, "targetWeight": 50.0, "note": "Wet all grounds"},
+    {"name": "Pour 1", "startSec": 40, "endSec": 75, "targetWeight": 180.0, "note": "Slow circular pour"}
   ]
 }
 ```
@@ -157,5 +178,5 @@ During brewing, the app tracks current stage index and updates progress bars and
 - **SharedPreferences:** Recipe persistence uses default SharedPreferences; consider migration if adding a database layer
 - **Emulator BLE:** Android Emulator has limited BLE support; use real device for reliable testing
 - **Gradle Version:** Project uses Gradle 8.2.2 with Kotlin 1.9.22; ensure gradle wrapper is up-to-date
-- **Arduino Board:** Firmware targets nRF52840 (Adafruit/M5StickC Plus2); different pins required for other boards
+- **Arduino Board:** Firmware targets the Seeed XIAO nRF52840 (`Seeeduino:nrf52:xiaonRF52840`); different pins required for other boards
 - **NAU7802 I2C:** Scale operates at I2C address 0x2A on default Qwiic connector; verify wiring if not detecting scale on boot
