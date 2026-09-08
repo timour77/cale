@@ -369,18 +369,25 @@ void loop() {
     inactivityReferenceWeight = reportedWeight;
   }
 
+  // readRawAverage blocks for the better part of a second, so `now` is stale
+  // afterwards. Anything comparing against it must be given a fresh reading, or
+  // the timestamps end up in the future and unsigned subtraction wraps.
   if (tareRequested) {
     manualZero = (double)readRawAverage(CAL_READ_SAMPLES);
     rawFiltered = manualZero;
     reportedWeight = 0.0f;
     tareRequested = false;
-    lastWeightActivityMs = millis();
+    now = millis();
+    lastWeightActivityMs = now;
+    inactivityReferenceWeight = 0.0f;
   }
 
   if (calZeroRequested) {
     manualZero = (double)readRawAverage(CAL_READ_SAMPLES);
     rawFiltered = manualZero;
     calZeroRequested = false;
+    now = millis();
+    lastWeightActivityMs = now;
   }
 
   if (calSpanRequested) {
@@ -388,14 +395,19 @@ void loop() {
     calibrationFactor = (spanRaw - manualZero) / calSpanGramsRequested;
     saveCalibration();
     calSpanRequested = false;
+    now = millis();
+    lastWeightActivityMs = now;
   }
 
   // Auto-off. A running brew counts as activity; sending a BLE notification does
   // not, which is what used to reset this timer several times a second and made
   // the timeout unreachable.
+  // Signed difference on purpose: if a timestamp ever ends up ahead of `now`,
+  // this reads as negative rather than as four billion milliseconds. Powering the
+  // scale off is not something to do on an arithmetic accident.
   if (timerRunning) {
     lastWeightActivityMs = now;
-  } else if (now - lastWeightActivityMs > AUTO_OFF_TIMEOUT_MS) {
+  } else if ((int32_t)(now - lastWeightActivityMs) > (int32_t)AUTO_OFF_TIMEOUT_MS) {
     enterDeepSleep();
   }
 
@@ -410,6 +422,7 @@ void loop() {
     myScale.calibrateAFE();
     manualZero = (double)readRawAverage(CAL_READ_SAMPLES);
     rawFiltered = manualZero;
+    now = millis();
     lastAfeCalMs = now;
   }
 
