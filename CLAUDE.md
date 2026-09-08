@@ -63,10 +63,10 @@ and nothing outside `ScaleProtocol` should build or parse a frame.
 **Key Components:**
 - **NAU7802 Driver:** ADC-based weight sensor with gain-of-128 load cell interface
 - **Calibration:** Manual zero/span calibration stored in flash (`/scale_cal.bin`)
-- **Filtering:** IIR low-pass filter (alpha=0.30) with jump detection (2.0g threshold) and zero-tracking
-- **BLE Notifications:** Sends weight and battery updates at ~10 SPS (samples per second)
+- **Filtering:** ADC free-runs at 40 SPS; the loop drains it without blocking and smooths with an IIR filter (alpha=0.05, tau ~0.5s) plus jump detection (2.0g threshold). Zero-tracking runs separately on a 250ms cadence with a 0.5g band and a ~25s time constant, and its accumulator is a `double` — as a `long` it truncated toward zero every update, which was a one-way drift of roughly 6g/hour
+- **BLE Notifications:** Weight every 100ms, battery every 30s. Reported weight has a 0.05g deadband so the last display digit does not flicker when the scale is idle
 - **Control Handler:** Parses incoming commands (TARE, CAL:ZERO, CAL:SPAN, STAGE_SET, etc.)
-- **Auto-off:** 10-minute inactivity timeout
+- **Auto-off:** after 10 minutes without a weight change (a running timer counts as activity), `enterDeepSleep()` puts the nRF52840 into SYSTEM OFF at ~2uA. Only the tare button on D0 wakes it, via GPIO SENSE, and it returns as a cold start — calibration survives in LittleFS
 - **Battery Monitoring:** Analog read of battery voltage via nRF52 ADC
 
 ## Common Development Tasks
